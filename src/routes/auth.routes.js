@@ -1,5 +1,6 @@
 const express = require('express');
 const authService = require('../services/auth.service');
+const { authenticate } = require('../middleware/auth');
 const { z } = require('zod');
 
 const router = express.Router();
@@ -47,5 +48,24 @@ router.post('/google/callback', async (req, res) => {
 });
 
 module.exports = router;
+
+// Authenticated profile route
+router.get('/me', authenticate, async (req, res) => {
+  try {
+    // Minimal profile response based on JWT contents; could be expanded with DB fetch
+    res.json({ success: true, user: { id: req.user.userId, email: req.user.email, provider: req.user.provider } });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Stateless logout (client clears token)
+router.post('/logout', authenticate, async (req, res) => {
+  try {
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
 
 
