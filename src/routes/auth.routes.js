@@ -47,6 +47,70 @@ router.post('/google/callback', async (req, res) => {
   }
 });
 
+router.get('/google/url', async (req, res) => {
+  try {
+    const url = authService.getGoogleAuthUrl();
+    res.json({ success: true, url });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/refresh', async (req, res) => {
+  try {
+    const schema = z.object({ refreshToken: z.string().min(1) });
+    const { refreshToken } = schema.parse(req.body);
+    const result = await authService.refresh(refreshToken);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/verify-email', async (req, res) => {
+  try {
+    const schema = z.object({ token: z.string().min(1) });
+    const { token } = schema.parse(req.body);
+    const result = await authService.verifyEmail(token);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/resend-verification', async (req, res) => {
+  try {
+    const schema = z.object({ email: z.string().email() });
+    const { email } = schema.parse(req.body);
+    const result = await authService.resendVerification(email);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const schema = z.object({ email: z.string().email() });
+    const { email } = schema.parse(req.body);
+    const result = await authService.forgotPassword(email);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/reset-password', async (req, res) => {
+  try {
+    const schema = z.object({ token: z.string().min(1), password: z.string().min(8) });
+    const { token, password } = schema.parse(req.body);
+    const result = await authService.resetPassword(token, password);
+    res.json({ success: true, ...result });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
 module.exports = router;
 
 // Authenticated profile route
