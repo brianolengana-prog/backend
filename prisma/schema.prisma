@@ -16,7 +16,7 @@ datasource db {
 // ========================================
 
 model User {
-  id                String    @id @default(cuid())
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email             String    @unique
   name              String
   passwordHash      String?   @map("password_hash")
@@ -143,8 +143,8 @@ model CallSheet {
 // ========================================
 
 model PasswordResetToken {
-  id        String   @id @default(cuid())
-  userId    String   @map("user_id")
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
   token     String   @unique
   expiresAt DateTime @map("expires_at")
   used      Boolean  @default(false)
@@ -157,8 +157,8 @@ model PasswordResetToken {
 }
 
 model EmailVerificationToken {
-  id        String   @id @default(cuid())
-  userId    String   @map("user_id")
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
   token     String   @unique
   expiresAt DateTime @map("expires_at")
   used      Boolean  @default(false)
@@ -171,8 +171,8 @@ model EmailVerificationToken {
 }
 
 model TwoFactorCode {
-  id        String   @id @default(cuid())
-  userId    String   @map("user_id")
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
   code      String
   expiresAt DateTime @map("expires_at")
   used      Boolean  @default(false)
@@ -185,8 +185,8 @@ model TwoFactorCode {
 }
 
 model SecurityAuditLog {
-  id        String   @id @default(cuid())
-  userId    String?  @map("user_id")
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
   action    String
   ipAddress String?  @map("ip_address")
   userAgent String?  @map("user_agent")
@@ -201,8 +201,8 @@ model SecurityAuditLog {
 }
 
 model Session {
-  id           String   @id @default(cuid())
-  userId       String   @map("user_id")
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
   accessToken  String   @unique @map("access_token")
   refreshToken String   @unique @map("refresh_token")
   expiresAt    DateTime @map("expires_at")
@@ -219,8 +219,8 @@ model Session {
 }
 
 model Usage {
-  id            String   @id @default(cuid())
-  userId        String   @map("user_id")
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
   month         String   // YYYY-MM format
   jobsProcessed Int      @default(0) @map("jobs_processed")
   contactsExtracted Int  @default(0) @map("contacts_extracted")
