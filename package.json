@@ -36,6 +36,8 @@
     "pdfjs-dist": "4.0.379",
     "tesseract.js": "5.0.4",
     "sharp": "0.33.2",
+    "@aws-sdk/client-textract": "^3.490.0",
+    "@aws-sdk/client-s3": "^3.490.0",
     "prisma": "6.16.2",
     "stripe": "14.25.0",
     "tmp": "0.2.3",

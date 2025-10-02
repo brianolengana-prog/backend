@@ -11,6 +11,7 @@
 const extractionService = require('./extraction.service');
 const aiExtractionService = require('./aiExtraction.service');
 const optimizedAIExtractionService = require('./optimizedAIExtraction.service');
+const awsTextractService = require('./awsTextract.service');
 const { PrismaClient } = require('@prisma/client');
 
 class HybridExtractionService {
@@ -18,11 +19,13 @@ class HybridExtractionService {
     this.prisma = new PrismaClient();
     this.aiAvailable = aiExtractionService.getHealthStatus().available;
     this.optimizedAIAvailable = optimizedAIExtractionService.getHealthStatus().available;
+    this.awsTextractAvailable = awsTextractService.getHealthStatus().available;
     this.patternAvailable = true; // Pattern extraction is always available
     
     console.log(`🔧 Hybrid Extraction Service initialized:`);
     console.log(`  - AI Extraction: ${this.aiAvailable ? '✅ Available' : '❌ Unavailable'}`);
     console.log(`  - Optimized AI: ${this.optimizedAIAvailable ? '✅ Available' : '❌ Unavailable'}`);
+    console.log(`  - AWS Textract: ${this.awsTextractAvailable ? '✅ Available' : '❌ Unavailable'}`);
     console.log(`  - Pattern Extraction: ${this.patternAvailable ? '✅ Available' : '❌ Unavailable'}`);
   }
 
@@ -88,6 +91,55 @@ class HybridExtractionService {
           } else {
             result = await extractionService.extractContacts(fileBuffer, mimeType, fileName, options);
             extractionMethod = 'pattern-only-ai-unavailable';
+          }
+          break;
+
+        case 'aws-textract-primary':
+          if (this.awsTextractAvailable) {
+            try {
+              // First extract text with AWS Textract
+              const textractResult = await awsTextractService.extractTextFromDocument(fileBuffer, mimeType, fileName, options);
+              if (textractResult.success) {
+                // Then use AI to extract contacts from the text
+                if (this.optimizedAIAvailable) {
+                  result = await optimizedAIExtractionService.extractContactsFromText(textractResult.text, options);
+                  extractionMethod = 'aws-textract-with-ai';
+                } else if (this.aiAvailable) {
+                  result = await aiExtractionService.extractContactsFromText(textractResult.text, options);
+                  extractionMethod = 'aws-textract-with-ai';
+                } else {
+                  // Fallback to pattern extraction on the text
+                  result = await extractionService.extractContactsFromText(textractResult.text, options);
+                  extractionMethod = 'aws-textract-with-pattern';
+                }
+              } else {
+                throw new Error('AWS Textract failed: ' + textractResult.error);
+              }
+            } catch (textractError) {
+              console.warn('⚠️ AWS Textract failed, trying AI fallback:', textractError.message);
+              if (this.optimizedAIAvailable) {
+                result = await optimizedAIExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
+                extractionMethod = 'aws-textract-primary-with-ai-fallback';
+              } else if (this.aiAvailable) {
+                result = await aiExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
+                extractionMethod = 'aws-textract-primary-with-ai-fallback';
+              } else {
+                result = await extractionService.extractContacts(fileBuffer, mimeType, fileName, options);
+                extractionMethod = 'aws-textract-primary-with-pattern-fallback';
+              }
+            }
+          } else {
+            // Fallback to AI or pattern if Textract not available
+            if (this.optimizedAIAvailable) {
+              result = await optimizedAIExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
+              extractionMethod = 'aws-textract-unavailable-using-ai';
+            } else if (this.aiAvailable) {
+              result = await aiExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
+              extractionMethod = 'aws-textract-unavailable-using-ai';
+            } else {
+              result = await extractionService.extractContacts(fileBuffer, mimeType, fileName, options);
+              extractionMethod = 'aws-textract-unavailable-using-pattern';
+            }
           }
           break;
 
@@ -178,11 +230,13 @@ class HybridExtractionService {
 
     // Decision logic based on characteristics
     if (characteristics.isScannedPDF) {
-      return this.aiAvailable ? 'ai-primary' : 'pattern-only';
+      return this.awsTextractAvailable ? 'aws-textract-primary' : 
+             (this.aiAvailable ? 'ai-primary' : 'pattern-only');
     }
 
     if (characteristics.isComplexDocument) {
-      return this.aiAvailable ? 'ai-primary' : 'pattern-only';
+      return this.awsTextractAvailable ? 'aws-textract-primary' :
+             (this.aiAvailable ? 'ai-primary' : 'pattern-only');
     }
 
     if (characteristics.isSimpleDocument) {
@@ -190,11 +244,13 @@ class HybridExtractionService {
     }
 
     if (characteristics.isLargeDocument) {
-      return this.aiAvailable ? 'ai-primary' : 'pattern-only';
+      return this.awsTextractAvailable ? 'aws-textract-primary' :
+             (this.aiAvailable ? 'ai-primary' : 'pattern-only');
     }
 
     // Default strategy
-    return this.aiAvailable ? 'ai-primary' : 'pattern-only';
+    return this.awsTextractAvailable ? 'aws-textract-primary' :
+           (this.aiAvailable ? 'ai-primary' : 'pattern-only');
   }
 
   /**
@@ -355,9 +411,11 @@ class HybridExtractionService {
       hybrid: true,
       aiAvailable: this.aiAvailable,
       optimizedAIAvailable: this.optimizedAIAvailable,
+      awsTextractAvailable: this.awsTextractAvailable,
       patternAvailable: this.patternAvailable,
       aiHealth: aiExtractionService.getHealthStatus(),
       optimizedAIHealth: optimizedAIExtractionService.getHealthStatus(),
+      awsTextractHealth: awsTextractService.getHealthStatus(),
       patternHealth: extractionService.getHealthStatus()
     };
   }

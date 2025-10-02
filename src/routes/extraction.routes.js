@@ -11,6 +11,7 @@ const { authenticateToken } = require('../middleware/auth');
 const extractionService = require('../services/extraction.service');
 const aiExtractionService = require('../services/aiExtraction.service');
 const optimizedAIExtractionService = require('../services/optimizedAIExtraction.service');
+const awsTextractService = require('../services/awsTextract.service');
 const hybridExtractionService = require('../services/hybridExtraction.service');
 const usageService = require('../services/usage.service');
 const { PrismaClient } = require('@prisma/client');
@@ -468,6 +469,109 @@ router.post('/upload-ai', upload.single('file'), async (req, res) => {
 });
 
 /**
+ * POST /api/extraction/upload-aws-textract
+ * Upload and extract contacts using AWS Textract + AI
+ */
+router.post('/upload-aws-textract', upload.single('file'), async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { rolePreferences, options } = req.body;
+    
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No file uploaded'
+      });
+    }
+
+    // Check usage limits
+    const canProcess = await usageService.canPerformAction(userId, 'upload', 1);
+    if (!canProcess.canProcess) {
+      return res.status(403).json({
+        success: false,
+        error: canProcess.reason,
+        requiresUpgrade: true
+      });
+    }
+
+    const fileBuffer = req.file.buffer;
+    
+    // Step 1: Extract text with AWS Textract
+    const textractResult = await awsTextractService.extractTextFromDocument(
+      fileBuffer, 
+      req.file.mimetype, 
+      req.file.originalname, 
+      options || {}
+    );
+
+    if (!textractResult.success) {
+      return res.status(500).json({
+        success: false,
+        error: `AWS Textract failed: ${textractResult.error}`
+      });
+    }
+
+    // Step 2: Extract contacts from text using AI
+    let contacts = [];
+    let extractionMethod = 'aws-textract-only';
+    
+    if (optimizedAIExtractionService.getHealthStatus().available) {
+      const aiResult = await optimizedAIExtractionService.extractContactsFromText(textractResult.text, options);
+      contacts = aiResult.contacts || [];
+      extractionMethod = 'aws-textract-with-optimized-ai';
+    } else if (aiExtractionService.getHealthStatus().available) {
+      const aiResult = await aiExtractionService.extractContactsFromText(textractResult.text, options);
+      contacts = aiResult.contacts || [];
+      extractionMethod = 'aws-textract-with-ai';
+    } else {
+      // Fallback to pattern extraction
+      const patternResult = await extractionService.extractContactsFromText(textractResult.text, options);
+      contacts = patternResult.contacts || [];
+      extractionMethod = 'aws-textract-with-pattern';
+    }
+
+    // Save contacts to database
+    let jobId = null;
+    if (contacts.length > 0) {
+      try {
+        const job = await prisma.job.create({
+          data: {
+            userId,
+            title: `AWS Textract Extraction - ${req.file.originalname}`,
+            fileName: req.file.originalname,
+            status: 'COMPLETED'
+          }
+        });
+
+        jobId = job.id;
+        await extractionService.saveContacts(contacts, userId, jobId);
+        await usageService.incrementUsage(userId, 'upload', 1);
+      } catch (dbError) {
+        console.error('❌ Database save error:', dbError);
+      }
+    }
+
+    res.json({
+      success: true,
+      contacts: contacts,
+      jobId: jobId,
+      metadata: {
+        extractionMethod,
+        textractMetadata: textractResult.metadata,
+        textLength: textractResult.text.length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ AWS Textract extraction error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'AWS Textract extraction failed'
+    });
+  }
+});
+
+/**
  * POST /api/extraction/upload-pattern
  * Upload and extract contacts using pattern-only method
  */
@@ -548,6 +652,7 @@ router.get('/methods', (req, res) => {
   try {
     const hybridHealth = hybridExtractionService.getHealthStatus();
     const aiHealth = optimizedAIExtractionService.getHealthStatus();
+    const awsTextractHealth = awsTextractService.getHealthStatus();
     const patternHealth = extractionService.getHealthStatus();
     
     const methods = {
@@ -574,6 +679,21 @@ router.get('/methods', (req, res) => {
           rateLimit: '3 requests per minute',
           tokenLimit: '60k tokens per minute',
           contextWindow: '128k tokens'
+        }
+      },
+      awsTextract: {
+        name: 'AWS Textract + AI',
+        description: 'Enterprise OCR with AWS Textract followed by AI contact extraction',
+        available: awsTextractHealth.available,
+        capabilities: ['Superior OCR', 'Table detection', 'Form analysis', 'Scanned PDFs', 'High accuracy'],
+        bestFor: ['Scanned PDFs', 'Complex documents', 'Tables', 'Forms', 'Production documents'],
+        processingTime: '5-15 seconds',
+        accuracy: '95-98%',
+        cost: '$1.50 per 1,000 pages (1,000 pages free/month)',
+        limitations: {
+          requiresAWS: 'AWS credentials and S3 bucket required',
+          fileTypes: 'PDF, JPG, PNG, TIFF only',
+          maxFileSize: '10MB per page'
         }
       },
       pattern: {
@@ -615,6 +735,7 @@ router.get('/health', (req, res) => {
   try {
     const hybridHealth = hybridExtractionService.getHealthStatus();
     const aiHealth = optimizedAIExtractionService.getHealthStatus();
+    const awsTextractHealth = awsTextractService.getHealthStatus();
     const patternHealth = extractionService.getHealthStatus();
     
     res.json({
@@ -622,6 +743,7 @@ router.get('/health', (req, res) => {
       health: {
         hybrid: hybridHealth,
         ai: aiHealth,
+        awsTextract: awsTextractHealth,
         pattern: patternHealth,
         overall: {
           status: hybridHealth.hybrid ? 'healthy' : 'degraded',
