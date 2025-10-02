@@ -26,7 +26,17 @@ class DashboardService {
       // Get Stripe customer info for billing status
       let stripeInfo = null;
       try {
-        stripeInfo = await stripeService.getCustomerInfo(userId);
+        // First, try to get the Stripe customer ID from the user's subscription
+        const userSubscription = await prisma.subscription.findFirst({
+          where: { userId },
+          select: { stripeCustomerId: true }
+        });
+        
+        if (userSubscription?.stripeCustomerId) {
+          stripeInfo = await stripeService.getCustomerInfo(userSubscription.stripeCustomerId);
+        } else {
+          console.log('⚠️ No Stripe customer ID found for user, using subscription service data');
+        }
       } catch (error) {
         console.log('⚠️ Could not get Stripe info, using subscription service data');
       }
@@ -157,12 +167,29 @@ class DashboardService {
         _count: { role: true }
       });
 
-      // Get contacts by production
-      const contactsByProduction = await prisma.contact.groupBy({
-        by: ['productionId'],
+      // Get contacts by production (via job relation)
+      const contactsByProduction = await prisma.contact.findMany({
         where: { userId },
-        _count: { productionId: true }
+        include: {
+          job: {
+            select: {
+              productionId: true
+            }
+          }
+        }
       });
+
+      // Group by production manually
+      const productionGroups = contactsByProduction.reduce((acc, contact) => {
+        const productionId = contact.job?.productionId || 'unknown';
+        acc[productionId] = (acc[productionId] || 0) + 1;
+        return acc;
+      }, {});
+
+      const contactsByProductionArray = Object.entries(productionGroups).map(([productionId, count]) => ({
+        productionId,
+        count
+      }));
 
       const metrics = {
         totalJobs,
@@ -177,10 +204,7 @@ class DashboardService {
           role: item.role || 'Unknown',
           count: item._count.role
         })),
-        contactsByProduction: contactsByProduction.map(item => ({
-          productionId: item.productionId,
-          count: item._count.productionId
-        })),
+        contactsByProduction: contactsByProductionArray,
         lastExtractionDate: jobs.length > 0 ? jobs[0].createdAt : null
       };
 

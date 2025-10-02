@@ -13,17 +13,7 @@ class ContactsService {
 
       // Get all contacts from extraction jobs
       const contacts = await prisma.contact.findMany({
-        where: { userId },
-        include: {
-          job: {
-            select: {
-              id: true,
-              fileName: true,
-              status: true,
-              createdAt: true
-            }
-          }
-        }
+        where: { userId }
       });
 
       // Get total contacts count
@@ -36,12 +26,29 @@ class ContactsService {
         _count: { role: true }
       });
 
-      // Get contacts by production
-      const contactsByProduction = await prisma.contact.groupBy({
-        by: ['productionId'],
+      // Get contacts by production (via job relation)
+      const contactsByProduction = await prisma.contact.findMany({
         where: { userId },
-        _count: { productionId: true }
+        include: {
+          job: {
+            select: {
+              productionId: true
+            }
+          }
+        }
       });
+
+      // Group by production manually
+      const productionGroups = contactsByProduction.reduce((acc, contact) => {
+        const productionId = contact.job?.productionId || 'unknown';
+        acc[productionId] = (acc[productionId] || 0) + 1;
+        return acc;
+      }, {});
+
+      const contactsByProductionArray = Object.entries(productionGroups).map(([productionId, count]) => ({
+        productionId,
+        count
+      }));
 
       // Get recent contacts (last 30 days)
       const thirtyDaysAgo = new Date();
@@ -94,10 +101,7 @@ class ContactsService {
           role: item.role || 'Unknown',
           count: item._count.role
         })),
-        contactsByProduction: contactsByProduction.map(item => ({
-          productionId: item.productionId,
-          count: item._count.productionId
-        })),
+        contactsByProduction: contactsByProductionArray,
         // Extraction-specific stats
         averageContactsPerJob: jobsWithContacts.length > 0 
           ? Math.round((totalContacts / jobsWithContacts.length) * 100) / 100 
