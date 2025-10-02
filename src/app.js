@@ -17,6 +17,7 @@ const billingRoutes = require('./routes/billing.routes');
 const stripeRoutes = require('./routes/stripe.routes');
 const extractionRoutes = require('./routes/extraction.routes');
 const usageRoutes = require('./routes/usage.routes');
+const dashboardRoutes = require('./routes/dashboard.routes');
 
 const app = express();
 
@@ -77,6 +78,7 @@ app.use('/api/billing', billingLimiter, billingRoutes);
 app.use('/api/stripe', billingLimiter, stripeRoutes);
 app.use('/api/extraction', extractionLimiter, extractionRoutes);
 app.use('/api/usage', usageRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

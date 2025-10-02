@@ -1,5 +1,8 @@
 const Stripe = require('stripe');
 const stripeService = require('./stripe.service');
+const { PrismaClient } = require('@prisma/client');
+
+const prisma = new PrismaClient();
 
 class SubscriptionService {
   constructor() {
@@ -13,38 +16,72 @@ class SubscriptionService {
    */
   async getCurrentSubscription(userId) {
     try {
-      // For now, return a mock subscription since we don't have a database
-      // In production, this would query the database for the user's subscription
-      // and then sync with Stripe if needed
-      
+      console.log(`📊 Getting current subscription for user: ${userId}`);
+
+      // Get subscription from database
+      const subscription = await prisma.subscription.findFirst({
+        where: { userId: userId },
+        orderBy: { createdAt: 'desc' }
+      });
+
       // Get plans for the plan details
       const plansResult = await stripeService.getPlans();
       const plans = plansResult.plans || [];
-      const freePlan = plans.find(p => p.id === 'free') || {
-        id: 'free',
-        name: 'Free',
-        price: 0,
-        interval: 'month',
-        uploadsPerMonth: 1,
-        maxContacts: 10,
-        aiProcessingMinutes: 5,
-        storageGB: 1,
-        apiCallsPerMonth: 100,
-        supportLevel: 'Basic'
-      };
+      
+      if (subscription) {
+        // Find the plan details
+        const planDetails = plans.find(p => p.id === subscription.priceId) || 
+                           plans.find(p => p.id === 'free') || {
+          id: 'free',
+          name: 'Free',
+          price: 0,
+          interval: 'month',
+          uploadsPerMonth: 1,
+          maxContacts: 10,
+          aiProcessingMinutes: 5,
+          storageGB: 1,
+          apiCallsPerMonth: 100,
+          supportLevel: 'Basic'
+        };
 
-      return {
-        id: 'sub_mock_' + userId,
-        userId: userId,
-        planId: 'free',
-        status: 'active',
-        currentPeriodStart: new Date(),
-        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-        cancelAtPeriodEnd: false,
-        plan: freePlan
-      };
+        return {
+          id: subscription.id,
+          userId: userId,
+          planId: subscription.priceId,
+          status: subscription.status,
+          currentPeriodStart: subscription.currentPeriodStart,
+          currentPeriodEnd: subscription.currentPeriodEnd,
+          cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+          plan: planDetails
+        };
+      } else {
+        // No subscription found, return free plan
+        const freePlan = plans.find(p => p.id === 'free') || {
+          id: 'free',
+          name: 'Free',
+          price: 0,
+          interval: 'month',
+          uploadsPerMonth: 1,
+          maxContacts: 10,
+          aiProcessingMinutes: 5,
+          storageGB: 1,
+          apiCallsPerMonth: 100,
+          supportLevel: 'Basic'
+        };
+
+        return {
+          id: 'sub_free_' + userId,
+          userId: userId,
+          planId: 'free',
+          status: 'active',
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+          cancelAtPeriodEnd: false,
+          plan: freePlan
+        };
+      }
     } catch (error) {
-      console.error('Error getting current subscription:', error);
+      console.error('❌ Error getting current subscription:', error);
       throw error;
     }
   }
