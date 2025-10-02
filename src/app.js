@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const authRoutes = require('./routes/auth.routes');
 const googleAuthRoutes = require('./routes/googleAuth.routes');
+const subscriptionRoutes = require('./routes/subscription.routes');
 const billingRoutes = require('./routes/billing.routes');
 const stripeRoutes = require('./routes/stripe.routes');
 const extractionRoutes = require('./routes/extraction.routes');
@@ -71,6 +72,7 @@ app.get('/api/health', async (req, res) => {
 
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/google-auth', authLimiter, googleAuthRoutes);
+app.use('/api/subscription', billingLimiter, subscriptionRoutes);
 app.use('/api/billing', billingLimiter, billingRoutes);
 app.use('/api/stripe', billingLimiter, stripeRoutes);
 app.use('/api/extraction', extractionLimiter, extractionRoutes);
