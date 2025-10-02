@@ -44,7 +44,8 @@ async function authenticateToken(req, res, next) {
       email: user.email,
       name: user.name,
       provider: user.provider,
-      emailVerified: user.emailVerified
+      emailVerified: user.emailVerified,
+      stripeCustomerId: user.stripeCustomerId
     };
 
     next();

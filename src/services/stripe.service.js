@@ -76,6 +76,18 @@ class StripeService {
         }
       });
 
+      // Save customer ID to user if not already saved
+      if (metadata.userId && !existingCustomers.data.length) {
+        try {
+          const userRepository = require('../repositories/user.repository');
+          await userRepository.update(metadata.userId, { stripeCustomerId: customer.id });
+          console.log(`✅ Saved Stripe customer ID ${customer.id} to user ${metadata.userId}`);
+        } catch (dbError) {
+          console.error('❌ Error saving customer ID to user:', dbError);
+          // Continue anyway, the checkout session was created
+        }
+      }
+
       console.log(`✅ Created checkout session: ${session.id}`);
       return {
         success: true,
@@ -592,12 +604,58 @@ class StripeService {
   }
 
   /**
-   * Handle subscription updated webhook
+   * Handle subscription created/updated webhook
    */
   async handleSubscriptionUpdated(subscription) {
     console.log(`📝 Subscription updated: ${subscription.id}`);
-    // In a real implementation, you would update your database here
-    // For now, we'll just log the event
+    
+    try {
+      // Get customer ID from subscription
+      const customerId = subscription.customer;
+      const userId = subscription.metadata?.userId;
+      
+      if (userId && customerId) {
+        // Update user with Stripe customer ID if not already set
+        const userRepository = require('../repositories/user.repository');
+        const user = await userRepository.findById(userId);
+        
+        if (user && !user.stripeCustomerId) {
+          await userRepository.update(userId, { stripeCustomerId: customerId });
+          console.log(`✅ Updated user ${userId} with Stripe customer ID ${customerId}`);
+        }
+        
+        // Create or update subscription record in database
+        const subscriptionRepository = require('../repositories/subscription.repository');
+        const existingSubscription = await subscriptionRepository.findByStripeSubscriptionId(subscription.id);
+        
+        if (existingSubscription) {
+          // Update existing subscription
+          await subscriptionRepository.update(existingSubscription.id, {
+            status: subscription.status,
+            currentPeriodStart: new Date(subscription.current_period_start * 1000),
+            currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+            cancelAtPeriodEnd: subscription.cancel_at_period_end,
+            updatedAt: new Date()
+          });
+          console.log(`✅ Updated subscription record for user ${userId}`);
+        } else {
+          // Create new subscription record
+          await subscriptionRepository.create({
+            userId: userId,
+            stripeSubscriptionId: subscription.id,
+            stripeCustomerId: customerId,
+            priceId: subscription.items.data[0].price.id,
+            status: subscription.status,
+            currentPeriodStart: new Date(subscription.current_period_start * 1000),
+            currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+            cancelAtPeriodEnd: subscription.cancel_at_period_end
+          });
+          console.log(`✅ Created subscription record for user ${userId}`);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error handling subscription webhook:', error);
+    }
   }
 
   /**

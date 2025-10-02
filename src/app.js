@@ -29,6 +29,9 @@ const allowedOrigins = [
   env.FRONTEND_URL,
   'https://www.callsheetconverter.com',
   'https://callsheetconverter.com',
+  'https://sjcallsheets-project.vercel.app',
+  'https://sjcallsheets-project-*.vercel.app',
+  'https://*.vercel.app',
   'http://localhost:3000',
   'http://localhost:5173'
 ];
@@ -39,6 +42,16 @@ app.use(cors({
     if (!origin) return callback(null, true);
     
     if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // Check for Vercel wildcard patterns
+    if (origin && origin.match(/^https:\/\/.*\.vercel\.app$/)) {
+      return callback(null, true);
+    }
+    
+    // For development, allow localhost with any port
+    if (origin && origin.startsWith('http://localhost:')) {
       return callback(null, true);
     }
     

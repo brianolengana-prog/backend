@@ -80,6 +80,8 @@ router.post('/portal', async (req, res) => {
     let customerId = req.user.stripeCustomerId;
     
     if (!customerId) {
+      console.log('⚠️ No Stripe customer ID found, creating new customer...');
+      
       // Create customer if doesn't exist
       const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
       const customer = await stripe.customers.create({
@@ -89,8 +91,15 @@ router.post('/portal', async (req, res) => {
       });
       customerId = customer.id;
       
-      // In a real implementation, you would save this to your database
-      console.log(`✅ Created Stripe customer: ${customerId} for user: ${req.user.id}`);
+      // Update user with Stripe customer ID
+      try {
+        const userRepository = require('../repositories/user.repository');
+        await userRepository.update(req.user.id, { stripeCustomerId: customerId });
+        console.log(`✅ Created and saved Stripe customer: ${customerId} for user: ${req.user.id}`);
+      } catch (dbError) {
+        console.error('❌ Error saving Stripe customer ID to database:', dbError);
+        // Continue anyway, the customer was created in Stripe
+      }
     }
 
     const result = await stripeService.createCustomerPortalSession(customerId, returnUrl);
