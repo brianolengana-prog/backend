@@ -64,7 +64,10 @@ class UsageService {
         canUpload,
         reason: !canUpload ? `You have reached your ${planLimits.uploadsPerMonth} upload limit for this month` : undefined,
         totalContacts,
-        totalJobs
+        totalJobs,
+        // Additional fields for frontend compatibility
+        uploadsThisMonth: uploadsUsed,
+        currentPlan: subscription.planId
       };
 
       console.log(`📊 Usage info for user ${userId}:`, usageInfo);

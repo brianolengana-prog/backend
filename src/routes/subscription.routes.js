@@ -5,16 +5,13 @@ const { z } = require('zod');
 
 const router = express.Router();
 
-// All routes require authentication
-router.use(authenticateToken);
-
 /**
  * GET /api/subscription/plans
- * Get all available subscription plans
+ * Get all available subscription plans (PUBLIC - no auth required)
  */
 router.get('/plans', async (req, res) => {
   try {
-    console.log('📋 Fetching subscription plans');
+    console.log('📋 Fetching subscription plans (public)');
     const plans = await subscriptionService.getPlans();
     res.json({ success: true, plans });
   } catch (error) {
@@ -22,6 +19,9 @@ router.get('/plans', async (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to fetch plans' });
   }
 });
+
+// All other routes require authentication
+router.use(authenticateToken);
 
 /**
  * GET /api/subscription/current
@@ -95,9 +95,11 @@ router.put('/update', async (req, res) => {
 router.post('/cancel', async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log('📋 Canceling subscription for user:', userId);
+    const { immediately = false } = req.body;
     
-    const subscription = await subscriptionService.cancelSubscription(userId);
+    console.log('📋 Canceling subscription for user:', userId, 'immediately:', immediately);
+    
+    const subscription = await subscriptionService.cancelSubscription(userId, immediately);
     res.json({ success: true, subscription });
   } catch (error) {
     console.error('❌ Error canceling subscription:', error);

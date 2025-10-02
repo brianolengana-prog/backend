@@ -5,16 +5,13 @@ const { z } = require('zod');
 
 const router = express.Router();
 
-// All routes require authentication
-router.use(authenticateToken);
-
 /**
  * GET /api/stripe/plans
- * Get all available pricing plans
+ * Get all available pricing plans (PUBLIC - no auth required)
  */
 router.get('/plans', async (req, res) => {
   try {
-    console.log('📋 Fetching Stripe plans');
+    console.log('📋 Fetching Stripe plans (public)');
     const result = await stripeService.getPlans();
     res.json(result);
   } catch (error) {
@@ -22,6 +19,9 @@ router.get('/plans', async (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to fetch plans' });
   }
 });
+
+// All other routes require authentication
+router.use(authenticateToken);
 
 /**
  * POST /api/stripe/checkout

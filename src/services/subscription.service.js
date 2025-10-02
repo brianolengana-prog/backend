@@ -99,15 +99,26 @@ class SubscriptionService {
         throw new Error('Invalid plan ID');
       }
 
-      // Handle free plan
+      // Handle free plan - create in database
       if (plan.id === 'free') {
+        const subscription = await prisma.subscription.create({
+          data: {
+            userId: userId,
+            priceId: 'free',
+            status: 'active',
+            currentPeriodStart: new Date(),
+            currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+            cancelAtPeriodEnd: false
+          }
+        });
+
         return {
-          id: 'sub_mock_' + userId,
+          id: subscription.id,
           userId: userId,
           planId: 'free',
           status: 'active',
-          currentPeriodStart: new Date(),
-          currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+          currentPeriodStart: subscription.currentPeriodStart,
+          currentPeriodEnd: subscription.currentPeriodEnd,
           cancelAtPeriodEnd: false,
           plan: plan
         };
@@ -115,8 +126,19 @@ class SubscriptionService {
 
       // For paid plans, create Stripe subscription
       // This is a simplified version - in production you'd handle Stripe customer creation
+      const subscription = await prisma.subscription.create({
+        data: {
+          userId: userId,
+          priceId: planId,
+          status: 'pending',
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+          cancelAtPeriodEnd: false
+        }
+      });
+
       return {
-        id: 'sub_stripe_' + userId,
+        id: subscription.id,
         userId: userId,
         planId: planId,
         status: 'active',
@@ -137,6 +159,8 @@ class SubscriptionService {
    */
   async updateSubscription(userId, planId) {
     try {
+      console.log(`🔄 Updating subscription for user: ${userId} to plan: ${planId}`);
+      
       const plans = await this.getPlans();
       const plan = plans.find(p => p.id === planId);
       
@@ -144,18 +168,33 @@ class SubscriptionService {
         throw new Error('Invalid plan ID');
       }
 
+      // Update existing subscription in database
+      const subscription = await prisma.subscription.updateMany({
+        where: { userId },
+        data: {
+          priceId: planId,
+          updatedAt: new Date()
+        }
+      });
+
+      // Get the updated subscription
+      const updatedSubscription = await prisma.subscription.findFirst({
+        where: { userId },
+        orderBy: { createdAt: 'desc' }
+      });
+
       return {
-        id: 'sub_mock_' + userId,
+        id: updatedSubscription.id,
         userId: userId,
         planId: planId,
-        status: 'active',
-        currentPeriodStart: new Date(),
-        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        cancelAtPeriodEnd: false,
+        status: updatedSubscription.status,
+        currentPeriodStart: updatedSubscription.currentPeriodStart,
+        currentPeriodEnd: updatedSubscription.currentPeriodEnd,
+        cancelAtPeriodEnd: updatedSubscription.cancelAtPeriodEnd,
         plan: plan
       };
     } catch (error) {
-      console.error('Error updating subscription:', error);
+      console.error('❌ Error updating subscription:', error);
       throw error;
     }
   }
@@ -163,20 +202,70 @@ class SubscriptionService {
   /**
    * Cancel subscription
    */
-  async cancelSubscription(userId) {
+  async cancelSubscription(userId, immediately = false) {
     try {
+      console.log(`❌ Canceling subscription for user: ${userId}, immediately: ${immediately}`);
+      
+      // Get current subscription
+      const currentSubscription = await prisma.subscription.findFirst({
+        where: { userId },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      if (!currentSubscription) {
+        throw new Error('No active subscription found');
+      }
+
+      // If it's a Stripe subscription, cancel it on Stripe
+      if (currentSubscription.stripeSubscriptionId) {
+        try {
+          if (immediately) {
+            // Cancel immediately
+            await this.stripe.subscriptions.cancel(currentSubscription.stripeSubscriptionId);
+          } else {
+            // Cancel at period end
+            await this.stripe.subscriptions.update(currentSubscription.stripeSubscriptionId, {
+              cancel_at_period_end: true
+            });
+          }
+        } catch (stripeError) {
+          console.error('❌ Stripe cancellation error:', stripeError);
+          // Continue with database update even if Stripe fails
+        }
+      }
+
+      // Update subscription in database
+      const subscription = await prisma.subscription.updateMany({
+        where: { userId },
+        data: {
+          status: immediately ? 'canceled' : 'active',
+          cancelAtPeriodEnd: !immediately,
+          canceledAt: new Date(),
+          updatedAt: new Date()
+        }
+      });
+
+      // Get the updated subscription
+      const updatedSubscription = await prisma.subscription.findFirst({
+        where: { userId },
+        orderBy: { createdAt: 'desc' }
+      });
+
       return {
-        id: 'sub_mock_' + userId,
+        id: updatedSubscription.id,
         userId: userId,
-        planId: 'free',
-        status: 'canceled',
-        currentPeriodStart: new Date(),
-        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        cancelAtPeriodEnd: true,
-        canceledAt: new Date()
+        planId: updatedSubscription.priceId,
+        status: updatedSubscription.status,
+        currentPeriodStart: updatedSubscription.currentPeriodStart,
+        currentPeriodEnd: updatedSubscription.currentPeriodEnd,
+        cancelAtPeriodEnd: updatedSubscription.cancelAtPeriodEnd,
+        canceledAt: updatedSubscription.canceledAt,
+        message: immediately 
+          ? 'Subscription canceled immediately' 
+          : 'Subscription will be canceled at the end of the current period'
       };
     } catch (error) {
-      console.error('Error canceling subscription:', error);
+      console.error('❌ Error canceling subscription:', error);
       throw error;
     }
   }
@@ -186,18 +275,37 @@ class SubscriptionService {
    */
   async resumeSubscription(userId) {
     try {
+      console.log(`▶️ Resuming subscription for user: ${userId}`);
+      
+      // Update subscription to active status
+      const subscription = await prisma.subscription.updateMany({
+        where: { userId },
+        data: {
+          status: 'active',
+          cancelAtPeriodEnd: false,
+          canceledAt: null,
+          updatedAt: new Date()
+        }
+      });
+
+      // Get the updated subscription
+      const updatedSubscription = await prisma.subscription.findFirst({
+        where: { userId },
+        orderBy: { createdAt: 'desc' }
+      });
+
       return {
-        id: 'sub_mock_' + userId,
+        id: updatedSubscription.id,
         userId: userId,
-        planId: 'starter',
+        planId: updatedSubscription.priceId,
         status: 'active',
-        currentPeriodStart: new Date(),
-        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        currentPeriodStart: updatedSubscription.currentPeriodStart,
+        currentPeriodEnd: updatedSubscription.currentPeriodEnd,
         cancelAtPeriodEnd: false,
         canceledAt: null
       };
     } catch (error) {
-      console.error('Error resuming subscription:', error);
+      console.error('❌ Error resuming subscription:', error);
       throw error;
     }
   }
@@ -270,16 +378,59 @@ class SubscriptionService {
    */
   async getBillingInfo(userId) {
     try {
+      console.log(`💳 Getting billing info for user: ${userId}`);
+      
+      // Get user from database
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          name: true
+        }
+      });
+
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      // Get Stripe customer if exists
+      const stripeCustomer = await this.getStripeCustomer(userId);
+      
       return {
-        id: 'cus_mock_' + userId,
-        email: 'user@example.com',
-        name: 'Mock User',
-        address: null,
-        paymentMethod: null
+        id: stripeCustomer?.id || `cus_${userId}`,
+        email: user.email,
+        name: user.name,
+        address: stripeCustomer?.address || null,
+        paymentMethod: stripeCustomer?.default_source || null
       };
     } catch (error) {
-      console.error('Error getting billing info:', error);
+      console.error('❌ Error getting billing info:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get Stripe customer for user
+   */
+  async getStripeCustomer(userId) {
+    try {
+      // Get user's subscription to find Stripe customer ID
+      const subscription = await prisma.subscription.findFirst({
+        where: { userId },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      if (!subscription?.stripeCustomerId) {
+        return null;
+      }
+
+      // Get customer from Stripe
+      const customer = await this.stripe.customers.retrieve(subscription.stripeCustomerId);
+      return customer;
+    } catch (error) {
+      console.error('❌ Error getting Stripe customer:', error);
+      return null;
     }
   }
 

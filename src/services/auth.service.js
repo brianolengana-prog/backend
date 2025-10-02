@@ -15,7 +15,7 @@ class AuthService {
     this.oauth2 = new google.auth.OAuth2(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      `${process.env.FRONTEND_URL}/auth/google-callback`
+      `${process.env.FRONTEND_URL}/auth/callback`
     );
   }
 

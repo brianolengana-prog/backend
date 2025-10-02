@@ -348,20 +348,31 @@ class StripeService {
 
       const plans = prices.data.map(price => {
         const product = price.product;
+        const uploadsPerMonth = parseInt(product.metadata?.uploadsPerMonth || '1');
+        const maxContacts = parseInt(product.metadata?.maxContacts || '10');
+        const aiProcessingMinutes = parseInt(product.metadata?.aiProcessingMinutes || '5');
+        const storageGB = parseInt(product.metadata?.storageGB || '1');
+        const apiCallsPerMonth = parseInt(product.metadata?.apiCallsPerMonth || '100');
+        const supportLevel = product.metadata?.supportLevel || 'Basic';
+        
+        // Get features from Stripe product metadata
+        const features = this.getFeaturesFromMetadata(product.metadata);
+        
         return {
           id: product.metadata?.planId || product.id,
           name: product.name,
           price: price.unit_amount,
           interval: price.recurring.interval,
           stripePriceId: price.id,
-          uploadsPerMonth: parseInt(product.metadata?.uploadsPerMonth || '1'),
-          maxContacts: parseInt(product.metadata?.maxContacts || '10'),
-          aiProcessingMinutes: parseInt(product.metadata?.aiProcessingMinutes || '5'),
-          storageGB: parseInt(product.metadata?.storageGB || '1'),
-          apiCallsPerMonth: parseInt(product.metadata?.apiCallsPerMonth || '100'),
-          supportLevel: product.metadata?.supportLevel || 'Basic',
+          uploadsPerMonth,
+          maxContacts,
+          aiProcessingMinutes,
+          storageGB,
+          apiCallsPerMonth,
+          supportLevel,
           isPopular: product.metadata?.isPopular === 'true',
-          description: product.description || 'Perfect for trying out the service'
+          description: product.description || 'Perfect for trying out the service',
+          features: features
         };
       });
 
@@ -385,10 +396,51 @@ class StripeService {
   }
 
   /**
+   * Extract features from Stripe product metadata
+   */
+  getFeaturesFromMetadata(metadata) {
+    if (!metadata) return [];
+    
+    // Look for features in metadata
+    const features = [];
+    
+    // Check for features stored as JSON string
+    if (metadata.features) {
+      try {
+        const parsedFeatures = JSON.parse(metadata.features);
+        if (Array.isArray(parsedFeatures)) {
+          return parsedFeatures;
+        }
+      } catch (e) {
+        console.warn('Failed to parse features JSON:', e);
+      }
+    }
+    
+    // Check for features stored as comma-separated string
+    if (metadata.featuresList) {
+      return metadata.featuresList.split(',').map(f => f.trim()).filter(f => f.length > 0);
+    }
+    
+    // Check for individual feature fields
+    const featureFields = [
+      'feature1', 'feature2', 'feature3', 'feature4', 'feature5',
+      'feature6', 'feature7', 'feature8', 'feature9', 'feature10'
+    ];
+    
+    featureFields.forEach(field => {
+      if (metadata[field] && metadata[field].trim()) {
+        features.push(metadata[field].trim());
+      }
+    });
+    
+    return features;
+  }
+
+  /**
    * Get default plans when Stripe products don't exist
    */
   getDefaultPlans() {
-    return [
+    const plans = [
       {
         id: 'free',
         name: 'Free',
@@ -435,6 +487,66 @@ class StripeService {
         description: 'For growing teams and organizations'
       }
     ];
+
+    // Add features to each plan (using default features for fallback)
+    return plans.map(plan => ({
+      ...plan,
+      features: this.getDefaultFeatures(plan.id)
+    }));
+  }
+
+  /**
+   * Get default features for fallback plans
+   */
+  getDefaultFeatures(planId) {
+    const defaultFeatures = {
+      'free': [
+        '1 upload per month',
+        'Up to 10 contacts per extraction',
+        '5 minutes of AI processing',
+        '1GB storage',
+        '100 API calls per month',
+        'Basic support',
+        'CSV export',
+        'Excel export',
+        'Free trial',
+        'No credit card required',
+        'Real-time processing',
+        'Secure file handling'
+      ],
+      'starter': [
+        '50 uploads per month',
+        'Up to 500 contacts per extraction',
+        '1 hour of AI processing',
+        '10GB storage',
+        '1,000 API calls per month',
+        'Priority support',
+        'CSV export',
+        'Excel export',
+        'AI-powered extraction',
+        'Dashboard access',
+        'Real-time processing',
+        'Secure file handling'
+      ],
+      'professional': [
+        '200 uploads per month',
+        'Up to 2,000 contacts per extraction',
+        '5 hours of AI processing',
+        '50GB storage',
+        '5,000 API calls per month',
+        '24/7 support',
+        'CSV export',
+        'Excel export',
+        'Advanced AI extraction',
+        'Team collaboration',
+        'Custom integrations',
+        'Priority processing',
+        'Real-time processing',
+        'Secure file handling'
+      ]
+    };
+    
+    return defaultFeatures[planId] || [];
   }
 
   /**
