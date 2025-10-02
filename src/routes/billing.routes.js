@@ -27,16 +27,30 @@ router.post('/create-checkout-session', authenticate, async (req, res) => {
 // Create customer portal session
 router.post('/create-portal-session', authenticate, async (req, res) => {
   try {
-    const { customerId } = req.body;
-    if (!customerId) return res.status(400).json({ success: false, error: 'Customer ID required' });
-    const session = await billingService.createCustomerPortalSession(customerId);
+    // Get customer info first to get the Stripe customer ID
+    const customerInfo = await billingService.getCustomerByUserId(req.user.userId);
+    if (!customerInfo.hasSubscription || !customerInfo.customer?.id) {
+      return res.status(400).json({ success: false, error: 'No active subscription found' });
+    }
+    
+    const session = await billingService.createCustomerPortalSession(customerInfo.customer.id);
     res.json({ success: true, url: session.url });
   } catch (e) {
     res.status(400).json({ success: false, error: e.message });
   }
 });
 
-// Get customer info
+// Get customer info by user ID (for frontend compatibility)
+router.get('/customer', authenticate, async (req, res) => {
+  try {
+    const customer = await billingService.getCustomerByUserId(req.user.userId);
+    res.json({ success: true, ...customer });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
+// Get customer info by customer ID
 router.get('/customer/:customerId', authenticate, async (req, res) => {
   try {
     const customer = await billingService.getCustomer(req.params.customerId);
