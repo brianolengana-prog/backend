@@ -1,4 +1,5 @@
 const Stripe = require('stripe');
+const stripeService = require('./stripe.service');
 
 class SubscriptionService {
   constructor() {
@@ -14,6 +15,24 @@ class SubscriptionService {
     try {
       // For now, return a mock subscription since we don't have a database
       // In production, this would query the database for the user's subscription
+      // and then sync with Stripe if needed
+      
+      // Get plans for the plan details
+      const plansResult = await stripeService.getPlans();
+      const plans = plansResult.plans || [];
+      const freePlan = plans.find(p => p.id === 'free') || {
+        id: 'free',
+        name: 'Free',
+        price: 0,
+        interval: 'month',
+        uploadsPerMonth: 1,
+        maxContacts: 10,
+        aiProcessingMinutes: 5,
+        storageGB: 1,
+        apiCallsPerMonth: 100,
+        supportLevel: 'Basic'
+      };
+
       return {
         id: 'sub_mock_' + userId,
         userId: userId,
@@ -22,18 +41,7 @@ class SubscriptionService {
         currentPeriodStart: new Date(),
         currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
         cancelAtPeriodEnd: false,
-        plan: {
-          id: 'free',
-          name: 'Free',
-          price: 0,
-          interval: 'month',
-          uploadsPerMonth: 1,
-          maxContacts: 10,
-          aiProcessingMinutes: 5,
-          storageGB: 1,
-          apiCallsPerMonth: 100,
-          supportLevel: 'Basic'
-        }
+        plan: freePlan
       };
     } catch (error) {
       console.error('Error getting current subscription:', error);
@@ -254,53 +262,60 @@ class SubscriptionService {
    * Get available plans
    */
   async getPlans() {
-    return [
-      {
-        id: 'free',
-        name: 'Free',
-        price: 0,
-        interval: 'month',
-        stripePriceId: null,
-        uploadsPerMonth: 1,
-        maxContacts: 10,
-        aiProcessingMinutes: 5,
-        storageGB: 1,
-        apiCallsPerMonth: 100,
-        supportLevel: 'Basic',
-        isPopular: false,
-        description: 'Perfect for trying out the service'
-      },
-      {
-        id: 'starter',
-        name: 'Starter',
-        price: 2900, // $29.00 in cents
-        interval: 'month',
-        stripePriceId: 'price_starter_monthly',
-        uploadsPerMonth: 50,
-        maxContacts: 500,
-        aiProcessingMinutes: 60,
-        storageGB: 10,
-        apiCallsPerMonth: 1000,
-        supportLevel: 'Priority',
-        isPopular: true,
-        description: 'Most popular for professionals'
-      },
-      {
-        id: 'professional',
-        name: 'Professional',
-        price: 9900, // $99.00 in cents
-        interval: 'month',
-        stripePriceId: 'price_professional_monthly',
-        uploadsPerMonth: 200,
-        maxContacts: 2000,
-        aiProcessingMinutes: 300,
-        storageGB: 50,
-        apiCallsPerMonth: 5000,
-        supportLevel: '24/7',
-        isPopular: false,
-        description: 'For growing teams and organizations'
-      }
-    ];
+    try {
+      const result = await stripeService.getPlans();
+      return result.plans || [];
+    } catch (error) {
+      console.error('Error getting plans:', error);
+      // Return default plans as fallback
+      return [
+        {
+          id: 'free',
+          name: 'Free',
+          price: 0,
+          interval: 'month',
+          stripePriceId: null,
+          uploadsPerMonth: 1,
+          maxContacts: 10,
+          aiProcessingMinutes: 5,
+          storageGB: 1,
+          apiCallsPerMonth: 100,
+          supportLevel: 'Basic',
+          isPopular: false,
+          description: 'Perfect for trying out the service'
+        },
+        {
+          id: 'starter',
+          name: 'Starter',
+          price: 2900, // $29.00 in cents
+          interval: 'month',
+          stripePriceId: 'price_starter_monthly',
+          uploadsPerMonth: 50,
+          maxContacts: 500,
+          aiProcessingMinutes: 60,
+          storageGB: 10,
+          apiCallsPerMonth: 1000,
+          supportLevel: 'Priority',
+          isPopular: true,
+          description: 'Most popular for professionals'
+        },
+        {
+          id: 'professional',
+          name: 'Professional',
+          price: 9900, // $99.00 in cents
+          interval: 'month',
+          stripePriceId: 'price_professional_monthly',
+          uploadsPerMonth: 200,
+          maxContacts: 2000,
+          aiProcessingMinutes: 300,
+          storageGB: 50,
+          apiCallsPerMonth: 5000,
+          supportLevel: '24/7',
+          isPopular: false,
+          description: 'For growing teams and organizations'
+        }
+      ];
+    }
   }
 }
 
