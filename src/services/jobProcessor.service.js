@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const fs = require('fs').promises;
 const path = require('path');
 const winston = require('winston');
+const simpleExtractionService = require('./simpleExtraction.service');
 const optimizedHybridExtractionService = require('./optimizedHybridExtraction.service');
 const hybridExtractionService = require('./hybridExtraction.service');
 const aiExtractionService = require('./aiExtraction.service');
@@ -64,26 +65,20 @@ class JobProcessorService {
       const filePath = path.join(__dirname, '../temp', fileId);
       const fileBuffer = await fs.readFile(filePath);
 
-      // Process extraction based on method
-      let result;
-      switch (extractionMethod) {
-        case 'hybrid':
-          // Use optimized hybrid extraction for better performance
-          result = await optimizedHybridExtractionService.extractContacts(fileBuffer, `application/${fileType}`, fileName, options);
-          break;
-        case 'ai':
-          result = await this.processWithAI(fileBuffer, fileType, fileName, options);
-          break;
-        case 'pattern':
-          result = await this.processWithPattern(fileBuffer, fileType, fileName, options);
-          break;
-        case 'aws-textract':
-          result = await this.processWithAWSTextract(fileBuffer, fileType, fileName, options);
-          break;
-        default:
-          // Default to optimized hybrid for unknown methods
-          result = await optimizedHybridExtractionService.extractContacts(fileBuffer, `application/${fileType}`, fileName, options);
-      }
+      // Process extraction using simple, reliable service
+      logger.info('🔍 Using simple extraction service', {
+        jobId,
+        fileName,
+        fileType,
+        extractionMethod
+      });
+
+      const result = await simpleExtractionService.extractContacts(
+        fileBuffer, 
+        `application/${fileType}`, 
+        fileName, 
+        options
+      );
 
       if (!result.success) {
         throw new Error(result.error || 'Extraction failed');

@@ -199,23 +199,8 @@ class ExtractionService {
       const fileExtension = path.extname(fileName).toLowerCase();
       let extractedText = '';
 
-      // Route to appropriate extraction method based on file type
-      if (mimeType === 'application/pdf' || fileExtension === '.pdf') {
-        extractedText = await this.extractTextFromPDF(fileBuffer);
-      } else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileExtension === '.docx') {
-        extractedText = await this.extractTextFromDOCX(fileBuffer);
-      } else if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || fileExtension === '.xlsx') {
-        extractedText = await this.extractTextFromXLSX(fileBuffer);
-      } else if (mimeType === 'application/vnd.ms-excel' || fileExtension === '.xls') {
-        extractedText = await this.extractTextFromXLS(fileBuffer);
-      } else if (mimeType === 'text/csv' || fileExtension === '.csv') {
-        extractedText = await this.extractTextFromCSV(fileBuffer);
-      } else if (mimeType.startsWith('image/')) {
-        extractedText = await this.extractTextFromImage(fileBuffer);
-      } else {
-        // Try to extract as plain text
-        extractedText = await this.extractTextFromPlainText(fileBuffer);
-      }
+      // Use the unified extraction method
+      extractedText = await this.extractTextFromDocument(fileBuffer, mimeType);
 
       if (!extractedText || extractedText.trim().length === 0) {
         throw new Error('No text content found in the document');
@@ -231,13 +216,59 @@ class ExtractionService {
   }
 
   /**
+   * Get file type from MIME type
+   */
+  getFileTypeFromMimeType(mimeType) {
+    const mimeTypeMap = {
+      'application/pdf': 'pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+      'application/vnd.ms-excel': 'xls',
+      'text/csv': 'csv',
+      'image/jpeg': 'image',
+      'image/png': 'image',
+      'image/gif': 'image',
+      'text/plain': 'text'
+    };
+    return mimeTypeMap[mimeType] || 'text';
+  }
+
+  /**
+   * Extract text from any document type
+   */
+  async extractTextFromDocument(fileBuffer, mimeType) {
+    const fileType = this.getFileTypeFromMimeType(mimeType);
+    
+    switch (fileType) {
+      case 'pdf':
+        return await this.extractTextFromPDF(fileBuffer);
+      case 'docx':
+        return await this.extractTextFromDOCX(fileBuffer);
+      case 'xlsx':
+        return await this.extractTextFromXLSX(fileBuffer);
+      case 'xls':
+        return await this.extractTextFromXLS(fileBuffer);
+      case 'csv':
+        return await this.extractTextFromCSV(fileBuffer);
+      case 'image':
+        return await this.extractTextFromImage(fileBuffer);
+      case 'text':
+        return await this.extractTextFromPlainText(fileBuffer);
+      default:
+        throw new Error(`Unsupported file type: ${fileType}`);
+    }
+  }
+
+  /**
    * Extract text from PDF documents
    */
   async extractTextFromPDF(buffer) {
     const pdfjs = await this.ensureLibrary('pdfjs', true);
     
     try {
-      const pdf = await pdfjs.getDocument({ data: buffer }).promise;
+      // Convert Buffer to Uint8Array if needed
+      const uint8Array = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+      const pdf = await pdfjs.getDocument({ data: uint8Array }).promise;
       let fullText = '';
       
       for (let i = 1; i <= pdf.numPages; i++) {
