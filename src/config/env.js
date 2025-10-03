@@ -13,9 +13,18 @@ const envSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
-  REDIS_HOST: z.string().min(1),
-  REDIS_PORT: z.string().transform(Number).default(6379),
+  // Redis is optional; default to disabled
+  REDIS_DISABLED: z.string().optional().default('true'),
+  REDIS_HOST: z.string().optional(),
+  REDIS_PORT: z.string().transform(Number).optional().default('6379'),
   REDIS_PASSWORD: z.string().optional()
+  ,
+  // AI controls: default OFF, only opt-in for reinforcement
+  DISABLE_AI: z.string().optional().default('true'),
+  AI_ENABLED_FOR_XLSX: z.string().optional().default('false'),
+  AI_MAX_CHUNKS: z.string().optional().default('20'),
+  AI_CHUNK_SIZE: z.string().optional().default('4000'),
+  AI_EARLY_EXIT_ON_ZERO_CONTACTS: z.string().optional().default('true')
 });
 
 const parsed = envSchema.safeParse(process.env);

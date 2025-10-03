@@ -311,12 +311,32 @@ class ExtractionService {
     try {
       const workbook = xlsx.read(buffer, { type: 'buffer' });
       let fullText = '';
+      const headerAliases = {
+        name: ['name', 'full name', 'contact name'],
+        role: ['role', 'position', 'title', 'job'],
+        email: ['email', 'e-mail', 'mail'],
+        phone: ['phone', 'mobile', 'cell', 'tel', 'telephone']
+      };
+      const normalizeHeader = (h) => h.toLowerCase().trim();
+      const matchHeader = (h) => {
+        const key = normalizeHeader(h);
+        for (const [field, aliases] of Object.entries(headerAliases)) {
+          if (aliases.includes(key)) return field;
+        }
+        return null;
+      };
       
       workbook.SheetNames.forEach(sheetName => {
         const worksheet = workbook.Sheets[sheetName];
-        const sheetText = xlsx.utils.sheet_to_txt(worksheet);
-        if (sheetText.trim()) {
-          fullText += `\n--- Sheet: ${sheetName} ---\n${sheetText}\n`;
+        // Prefer structured CSV-like text but ensure we include headers
+        const json = xlsx.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        if (!json || json.length === 0) return;
+        const headerRow = json[0].map(String);
+        const mapped = headerRow.map(h => matchHeader(h) || normalizeHeader(h));
+        const rows = json.slice(1);
+        const lines = rows.map(r => r.map(c => String(c)).join('\t')).join('\n');
+        if (lines.trim()) {
+          fullText += `\n--- Sheet: ${sheetName} ---\n${headerRow.join('\t')}\n${lines}\n`;
         }
       });
       
@@ -548,6 +568,29 @@ class ExtractionService {
           email: this.extractEmail(match[2]),
           phone: this.extractPhone(match[3]),
           role: match[4].trim(),
+          confidence: 0.9
+        })
+      },
+      // Pattern 3b: Name | Company | Role | Email | Phone
+      {
+        regex: /^([^|]+)\|([^|]+)\|([^|]+)\|([^|\s]+@[^|\s]+)\|(.+)$/,
+        extract: (match) => ({
+          name: this.normalizeName(match[1]),
+          company: match[2].trim(),
+          role: match[3].trim(),
+          email: match[4].trim(),
+          phone: this.extractPhone(match[5]),
+          confidence: 0.9
+        })
+      },
+      // Pattern 3c: Tab-delimited: Name\tRole\tEmail\tPhone
+      {
+        regex: /^([^\t]+)\t([^\t]+)\t([^\t\s]+@[^\t\s]+)\t(.+)$/,
+        extract: (match) => ({
+          name: this.normalizeName(match[1]),
+          role: match[2].trim(),
+          email: match[3].trim(),
+          phone: this.extractPhone(match[4]),
           confidence: 0.9
         })
       },

@@ -1,4 +1,5 @@
 const winston = require('winston');
+const coreExtractor = require('./extraction.service');
 
 const logger = winston.createLogger({
   level: 'info',
@@ -43,6 +44,30 @@ class SimpleExtractionService {
         name: 'phone_pattern',
         regex: /([+\d\s\-\(\)]{10,})/gm,
         groups: ['phone']
+      },
+      // Pattern 6: Table with tabs: Name\tRole\tEmail\tPhone
+      {
+        name: 'tab_table_name_role_email_phone',
+        regex: /^([^\t]+)\t([^\t]+)\t([^\t\s]+@[^\t\s]+)\t(.+)$/gm,
+        groups: ['name', 'role', 'email', 'phone']
+      },
+      // Pattern 7: Table with multi-space columns: Name  Role  Email  Phone
+      {
+        name: 'space_table_name_role_email_phone',
+        regex: /^([A-Z][A-Za-z .'-]+)\s{2,}([A-Za-z &/]+)\s{2,}([^\s]+@[^\s]+)\s{2,}(.+)$/gm,
+        groups: ['name', 'role', 'email', 'phone']
+      },
+      // Pattern 8: Role: Name / Company / Email / Phone
+      {
+        name: 'role_name_company_email_phone',
+        regex: /^([^:]+):\s*([^\/|,]+)\s*[\/|,]\s*([^\/|,]+)\s*[\/|,]\s*([^\s@]+@[^\s,|\/]+)\s*[\/|,]\s*(.+)$/gm,
+        groups: ['role', 'name', 'company', 'email', 'phone']
+      },
+      // Pattern 9: Name | Company | Role | Email | Phone
+      {
+        name: 'pipe_name_company_role_email_phone',
+        regex: /^([^|]+)\|([^|]+)\|([^|]+)\|([^|\s]+@[^|\s]+)\|(.+)$/gm,
+        groups: ['name', 'company', 'role', 'email', 'phone']
       }
     ];
 
@@ -84,10 +109,11 @@ class SimpleExtractionService {
         throw new Error('No text content found in the document');
       }
 
+      const maskedPreview = this.maskPII(text.substring(0, 200));
       logger.info('📄 Text extracted', {
         extractionId,
         textLength: text.length,
-        preview: text.substring(0, 200) + '...'
+        preview: maskedPreview + '...'
       });
 
       // Step 2: Extract contacts using patterns
@@ -140,19 +166,21 @@ class SimpleExtractionService {
    */
   async extractTextFromFile(fileBuffer, mimeType) {
     try {
-      if (mimeType === 'text/plain') {
+      // Delegate to core extractor to support PDF, DOCX, XLSX, CSV, images
+      const text = await coreExtractor.extractTextFromDocument(fileBuffer, mimeType);
+      return text;
+    } catch (error) {
+      logger.warn('⚠️ Core text extraction failed, trying fallback', { error: error.message });
+      try {
+        // Minimal fallback: PDF handler, else utf-8
+        if (mimeType === 'application/pdf') {
+          return await this.extractTextFromPDF(fileBuffer);
+        }
+        return fileBuffer.toString('utf-8');
+      } catch (fallbackError) {
+        logger.warn('⚠️ Fallback text extraction failed', { error: fallbackError.message });
         return fileBuffer.toString('utf-8');
       }
-      
-      if (mimeType === 'application/pdf') {
-        return await this.extractTextFromPDF(fileBuffer);
-      }
-      
-      // For other types, try to read as text
-      return fileBuffer.toString('utf-8');
-    } catch (error) {
-      logger.warn('⚠️ Text extraction failed, trying fallback', { error: error.message });
-      return fileBuffer.toString('utf-8');
     }
   }
 
@@ -180,6 +208,16 @@ class SimpleExtractionService {
       logger.warn('⚠️ PDF extraction failed, using fallback', { error: error.message });
       return fileBuffer.toString('utf-8');
     }
+  }
+
+  /**
+   * Mask PII in log previews
+   */
+  maskPII(text) {
+    if (!text) return '';
+    const emailMasked = text.replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '***@***');
+    const phoneMasked = emailMasked.replace(/[+]?\d[\d\s().-]{6,}\d/g, '***-***-****');
+    return phoneMasked;
   }
 
   /**
@@ -290,12 +328,14 @@ class SimpleExtractionService {
    * Clean and normalize contacts
    */
   cleanContacts(contacts) {
-    return contacts.map(contact => ({
+    const sectioned = this.assignSections(contacts);
+    return sectioned.map(contact => ({
       name: this.cleanName(contact.name),
       role: this.cleanRole(contact.role),
       email: this.cleanEmail(contact.email),
       phone: this.cleanPhone(contact.phone),
       company: contact.company || '',
+      section: contact.section || undefined,
       source: contact.source || 'simple-pattern'
     }));
   }
@@ -335,9 +375,17 @@ class SimpleExtractionService {
    */
   cleanPhone(phone) {
     if (!phone) return '';
-    return phone.trim()
-      .replace(/\s+/g, ' ')
-      .trim();
+    const raw = phone.trim();
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length === 10) {
+      return `(${digits.substring(0, 3)}) ${digits.substring(3, 6)}-${digits.substring(6)}`;
+    }
+    if (digits.length === 11 && digits.startsWith('1')) {
+      const us = digits.substring(1);
+      return `(${us.substring(0, 3)}) ${us.substring(3, 6)}-${us.substring(6)}`;
+    }
+    // Fall back to compact form
+    return (raw.startsWith('+') ? '+' : '') + digits;
   }
 
   /**
@@ -352,6 +400,29 @@ class SimpleExtractionService {
       }
       seen.add(key);
       return true;
+    });
+  }
+
+  /**
+   * Assign section labels based on nearby headers without AI
+   */
+  assignSections(contacts) {
+    // Use rawLine and simple heuristics to infer sections
+    const sections = ['PRODUCTION', 'CLIENT', 'TALENT', 'CREW', 'AGENCY', 'CONTACTS'];
+    return contacts.map(c => {
+      const line = (c.rawLine || '').toUpperCase();
+      for (const s of sections) {
+        if (line.includes(s)) {
+          return { ...c, section: s };
+        }
+      }
+      // Fallback: infer from role
+      const role = (c.role || '').toUpperCase();
+      if (role.includes('PRODUCER') || role.includes('PRODUCTION')) return { ...c, section: 'PRODUCTION' };
+      if (role.includes('MODEL') || role.includes('TALENT')) return { ...c, section: 'TALENT' };
+      if (role.includes('AGENCY') || role.includes('CLIENT')) return { ...c, section: 'CLIENT' };
+      if (role.includes('ASSIST') || role.includes('CREW') || role.includes('GAFFER') || role.includes('GRIP')) return { ...c, section: 'CREW' };
+      return c;
     });
   }
 }

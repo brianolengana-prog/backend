@@ -14,7 +14,8 @@ const optimizedAIExtractionService = require('../services/optimizedAIExtraction.
 const awsTextractService = require('../services/awsTextract.service');
 const hybridExtractionService = require('../services/hybridExtraction.service');
 const usageService = require('../services/usage.service');
-const queueService = require('../services/queue.service');
+// Queue removed: we process synchronously for reliability
+// const queueService = require('../services/queue.service');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
@@ -120,124 +121,40 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     };
 
     const fileType = fileTypeMap[req.file.mimetype] || 'pdf';
+  // Always process synchronously for stability
+  try {
+    const hybridExtractionService = require('../services/hybridExtraction.service');
 
-    // If Redis is disabled, process synchronously immediately
-    if (process.env.REDIS_DISABLED === 'true') {
-      console.warn('⚠️ Redis disabled, processing synchronously');
-      try {
-        const hybridExtractionService = require('../services/hybridExtraction.service');
+    const result = await hybridExtractionService.extractContacts(
+      req.file.buffer,
+      req.file.mimetype,
+      req.file.originalname,
+      { userId, ...parsedOptions }
+    );
 
-        const result = await hybridExtractionService.extractContacts(
-          req.file.buffer,
-          req.file.mimetype,
-          req.file.originalname,
-          { userId, ...parsedOptions }
-        );
-
-        if (!result.success) {
-          throw new Error(result.error || 'Extraction failed');
-        }
-
-        await usageService.incrementUsage(userId, 'upload', 1);
-        if (result.contacts && result.contacts.length > 0) {
-          await usageService.incrementUsage(userId, 'contact_extraction', result.contacts.length);
-        }
-
-        return res.json({
-          success: true,
-          jobId: `sync_${Date.now()}`,
-          status: 'completed',
-          result: {
-            contacts: result.contacts || [],
-            metadata: result.metadata || {},
-            processingTime: result.metadata?.processingTime || 0
-          }
-        });
-      } catch (syncImmediateError) {
-        console.error('❌ Synchronous processing failed:', syncImmediateError.message);
-        return res.status(500).json({ success: false, error: syncImmediateError.message });
-      }
+    if (!result.success) {
+      throw new Error(result.error || 'Extraction failed');
     }
 
-    // Try to add job to queue first
-    let jobResult;
-    try {
-      jobResult = await queueService.addExtractionJob({
-        userId,
-        fileName: req.file.originalname,
-        fileType,
-        fileSize: req.file.size,
-        extractionMethod,
-        priority,
-        options: parsedOptions,
-        fileBuffer: req.file.buffer,
-        metadata: {
-          source: 'api',
-          userAgent: req.get('User-Agent'),
-          ipAddress: req.ip
-        }
-      });
-
-      if (!jobResult.success) {
-        throw new Error(jobResult.error);
-      }
-
-      console.log('✅ File queued for processing:', jobResult.jobId);
-    } catch (queueError) {
-      console.warn('⚠️ Queue processing failed, falling back to synchronous processing:', queueError.message);
-      
-      // Fallback to synchronous processing
-      try {
-        const hybridExtractionService = require('../services/hybridExtraction.service');
-        
-        console.log('🔄 Processing file synchronously...');
-        const result = await hybridExtractionService.extractContacts(
-          req.file.buffer,
-          req.file.mimetype,
-          req.file.originalname,
-          { userId, ...parsedOptions }
-        );
-
-        if (!result.success) {
-          throw new Error(result.error || 'Extraction failed');
-        }
-
-        // Update usage tracking
-        await usageService.incrementUsage(userId, 'upload', 1);
-        if (result.contacts && result.contacts.length > 0) {
-          await usageService.incrementUsage(userId, 'contact_extraction', result.contacts.length);
-        }
-
-        console.log('✅ Synchronous processing completed successfully');
-
-        return res.json({
-          success: true,
-          jobId: `sync_${Date.now()}`,
-          status: 'completed',
-          result: {
-            contacts: result.contacts || [],
-            metadata: result.metadata || {},
-            processingTime: result.metadata?.processingTime || 0
-          }
-        });
-
-      } catch (syncError) {
-        console.error('❌ Synchronous processing also failed:', syncError.message);
-        return res.status(500).json({
-          success: false,
-          error: `Both queue and synchronous processing failed: ${syncError.message}`
-        });
-      }
+    await usageService.incrementUsage(userId, 'upload', 1);
+    if (result.contacts && result.contacts.length > 0) {
+      await usageService.incrementUsage(userId, 'contact_extraction', result.contacts.length);
     }
 
-    res.json({
+    return res.json({
       success: true,
-      jobId: jobResult.jobId,
-      fileId: jobResult.fileId,
-      status: 'queued',
-      estimatedProcessingTime: jobResult.estimatedProcessingTime,
-      message: 'File has been queued for processing. Use the job ID to check status.'
+      jobId: `sync_${Date.now()}`,
+      status: 'completed',
+      result: {
+        contacts: result.contacts || [],
+        metadata: result.metadata || {},
+        processingTime: result.metadata?.processingTime || 0
+      }
     });
+  } catch (syncImmediateError) {
+    console.error('❌ Synchronous processing failed:', syncImmediateError.message);
+    return res.status(500).json({ success: false, error: syncImmediateError.message });
+  }
 
   } catch (error) {
     console.error('❌ File upload error:', error);
@@ -843,138 +760,33 @@ router.get('/health', (req, res) => {
  * GET /api/extraction/job/:jobId
  * Get job status and results
  */
-router.get('/job/:jobId', async (req, res) => {
-  try {
-    const { jobId } = req.params;
-    const userId = req.user.id;
-
-    const jobStatus = await queueService.getJobStatus(jobId);
-    
-    if (!jobStatus.success) {
-      return res.status(404).json({
-        success: false,
-        error: jobStatus.error
-      });
-    }
-
-    // Verify job belongs to user
-    if (jobStatus.data.userId !== userId) {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied'
-      });
-    }
-
-    // If job is completed, get the results
-    let results = null;
-    if (jobStatus.status === 'completed') {
-      try {
-        const job = await prisma.job.findFirst({
-          where: { externalJobId: jobId },
-          include: {
-            contacts: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-                phone: true,
-                role: true,
-                company: true,
-                department: true,
-                confidence: true
-              }
-            }
-          }
-        });
-
-        if (job) {
-          results = {
-            jobId: job.id,
-            contacts: job.contacts,
-            metadata: job.metadata
-          };
-        }
-      } catch (dbError) {
-        console.error('❌ Error fetching job results:', dbError);
-      }
-    }
-
-    res.json({
-      success: true,
-      jobId: jobStatus.jobId,
-      status: jobStatus.status,
-      progress: jobStatus.progress,
-      results,
-      createdAt: jobStatus.createdAt,
-      processedAt: jobStatus.processedAt,
-      failedAt: jobStatus.failedAt
-    });
-
-  } catch (error) {
-    console.error('❌ Job status error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get job status'
-    });
-  }
+router.get('/job/:jobId', async (_req, res) => {
+  return res.status(410).json({
+    success: false,
+    error: 'Queue-based job status is deprecated. Upload processing is now synchronous.',
+  });
 });
 
 /**
  * DELETE /api/extraction/job/:jobId
  * Cancel a queued job
  */
-router.delete('/job/:jobId', async (req, res) => {
-  try {
-    const { jobId } = req.params;
-    const userId = req.user.id;
-
-    // First check if job belongs to user
-    const jobStatus = await queueService.getJobStatus(jobId);
-    if (!jobStatus.success || jobStatus.data.userId !== userId) {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied'
-      });
-    }
-
-    const cancelResult = await queueService.cancelJob(jobId);
-    
-    if (!cancelResult.success) {
-      return res.status(400).json({
-        success: false,
-        error: cancelResult.error
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'Job cancelled successfully'
-    });
-
-  } catch (error) {
-    console.error('❌ Cancel job error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to cancel job'
-    });
-  }
+router.delete('/job/:jobId', async (_req, res) => {
+  return res.status(410).json({
+    success: false,
+    error: 'Queue-based job cancellation is deprecated. Upload processing is now synchronous.',
+  });
 });
 
 /**
  * GET /api/extraction/queue/stats
  * Get queue statistics (admin only)
  */
-router.get('/queue/stats', async (req, res) => {
-  try {
-    const stats = await queueService.getQueueStats();
-    res.json(stats);
-  } catch (error) {
-    console.error('❌ Queue stats error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get queue statistics'
-    });
-  }
+router.get('/queue/stats', async (_req, res) => {
+  return res.status(410).json({
+    success: false,
+    error: 'Queue statistics endpoint is deprecated. Queue has been removed.'
+  });
 });
 
 module.exports = router;

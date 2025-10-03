@@ -40,33 +40,32 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173'
 ];
-
-app.use(cors({ 
+const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, etc.)
+    // Allow requests with no origin (mobile apps, server-to-server)
     if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    
-    // Check for Vercel wildcard patterns
-    if (origin && origin.match(/^https:\/\/.*\.vercel\.app$/)) {
-      return callback(null, true);
-    }
-    
-    // For development, allow localhost with any port
-    if (origin && origin.startsWith('http://localhost:')) {
-      return callback(null, true);
-    }
-    
+
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+
+    // Allow Vercel deployments
+    if (origin && origin.match(/^https:\/\/.*\.vercel\.app$/)) return callback(null, true);
+
+    // Allow any localhost port during development
+    if (origin && origin.startsWith('http://localhost:')) return callback(null, true);
+
     console.log('CORS blocked origin:', origin);
     return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Cache-Control', 'Pragma', 'Expires', 'X-Timestamp']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Cache-Control', 'Pragma', 'Expires', 'X-Timestamp'],
+  optionsSuccessStatus: 204,
+  preflightContinue: false
+};
+
+app.use(cors(corsOptions));
+// Explicitly handle preflight for all routes
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(compression());
