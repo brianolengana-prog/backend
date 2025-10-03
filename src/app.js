@@ -106,32 +106,47 @@ app.use(notFound);
 app.use(errorHandler);
 
 // Start workers in production
+console.log('🔍 Environment check:', {
+  NODE_ENV: process.env.NODE_ENV,
+  isProduction: process.env.NODE_ENV === 'production'
+});
+
 if (process.env.NODE_ENV === 'production') {
+  console.log('🚀 Starting workers in production...');
   const workerManager = require('./workers/workerManager');
   
   // Start workers after a short delay to ensure app is ready
   setTimeout(async () => {
     try {
+      console.log('⏰ Starting workers after delay...');
       await workerManager.start();
       console.log('✅ Workers started successfully');
     } catch (error) {
       console.error('❌ Failed to start workers:', error);
     }
   }, 2000);
-
-  // Graceful shutdown
-  process.on('SIGTERM', async () => {
-    console.log('🛑 SIGTERM received, shutting down workers...');
-    await workerManager.stop();
-    process.exit(0);
-  });
-
-  process.on('SIGINT', async () => {
-    console.log('🛑 SIGINT received, shutting down workers...');
-    await workerManager.stop();
-    process.exit(0);
-  });
+} else {
+  console.log('⚠️ Workers not started - not in production mode');
 }
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('🛑 SIGTERM received, shutting down workers...');
+  if (process.env.NODE_ENV === 'production') {
+    const workerManager = require('./workers/workerManager');
+    await workerManager.stop();
+  }
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('🛑 SIGINT received, shutting down workers...');
+  if (process.env.NODE_ENV === 'production') {
+    const workerManager = require('./workers/workerManager');
+    await workerManager.stop();
+  }
+  process.exit(0);
+});
 
 module.exports = app;
 

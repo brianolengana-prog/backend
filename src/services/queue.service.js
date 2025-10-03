@@ -75,6 +75,12 @@ class QueueService {
       });
 
       console.log('✅ Job added to queue successfully:', job.id);
+      console.log('📊 Queue stats:', {
+        waiting: await queue.getWaiting(),
+        active: await queue.getActive(),
+        completed: await queue.getCompleted(),
+        failed: await queue.getFailed()
+      });
       logger.info('Extraction job added to queue', {
         jobId: job.id,
         userId: validatedData.userId,
