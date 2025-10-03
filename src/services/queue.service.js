@@ -32,14 +32,22 @@ class QueueService {
 
   async addExtractionJob(jobData) {
     try {
+      // Generate fileId first
+      const fileId = uuidv4();
+      
+      // Add fileId to job data for validation
+      const jobDataWithFileId = {
+        ...jobData,
+        fileId
+      };
+
       // Validate job data
-      const { error, value } = JobSchemas[JobTypes.EXTRACTION].validate(jobData);
+      const { error, value } = JobSchemas[JobTypes.EXTRACTION].validate(jobDataWithFileId);
       if (error) {
         throw new Error(`Invalid job data: ${error.details[0].message}`);
       }
 
       const validatedData = value;
-      const fileId = uuidv4();
       
       // Save file to temporary storage
       const filePath = path.join(this.tempDir, fileId);
