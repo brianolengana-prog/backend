@@ -23,6 +23,9 @@ const contactsRoutes = require('./routes/contacts.routes');
 
 const app = express();
 
+// Trust proxy for rate limiting behind reverse proxy (Render, Vercel, etc.)
+app.set('trust proxy', 1);
+
 app.use(helmet());
 // CORS configuration for production
 const allowedOrigins = [

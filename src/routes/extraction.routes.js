@@ -413,7 +413,7 @@ router.post('/upload-ai', upload.single('file'), async (req, res) => {
 
     // Check usage limits
     const canProcess = await usageService.canPerformAction(userId, 'upload', 1);
-    if (!canProcess.canProcess) {
+    if (!canProcess.canPerform) {
       return res.status(403).json({
         success: false,
         error: canProcess.reason,
@@ -486,7 +486,7 @@ router.post('/upload-aws-textract', upload.single('file'), async (req, res) => {
 
     // Check usage limits
     const canProcess = await usageService.canPerformAction(userId, 'upload', 1);
-    if (!canProcess.canProcess) {
+    if (!canProcess.canPerform) {
       return res.status(403).json({
         success: false,
         error: canProcess.reason,
@@ -589,7 +589,7 @@ router.post('/upload-pattern', upload.single('file'), async (req, res) => {
 
     // Check usage limits
     const canProcess = await usageService.canPerformAction(userId, 'upload', 1);
-    if (!canProcess.canProcess) {
+    if (!canProcess.canPerform) {
       return res.status(403).json({
         success: false,
         error: canProcess.reason,

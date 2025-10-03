@@ -392,6 +392,99 @@ class UsageService {
       throw error;
     }
   }
+
+  /**
+   * Check if user can perform a specific action (upload, API call, etc.)
+   */
+  async canPerformAction(userId, actionType, quantity = 1) {
+    try {
+      console.log(`🔍 Checking if user ${userId} can perform ${actionType} (quantity: ${quantity})`);
+      
+      const usage = await this.getCurrentUsage(userId);
+      const planLimits = this.getPlanLimits(usage.planId);
+      
+      switch (actionType) {
+        case 'upload':
+          const canUpload = usage.uploadsUsed + quantity <= planLimits.uploadsPerMonth || planLimits.uploadsPerMonth === -1;
+          return {
+            canPerform: canUpload,
+            reason: canUpload ? null : `You have reached your ${planLimits.uploadsPerMonth} upload limit for this month`,
+            currentUsage: usage.uploadsUsed,
+            limit: planLimits.uploadsPerMonth,
+            remaining: planLimits.uploadsPerMonth === -1 ? -1 : Math.max(0, planLimits.uploadsPerMonth - usage.uploadsUsed)
+          };
+          
+        case 'api_call':
+          // For now, we'll allow API calls (we can add limits later)
+          return {
+            canPerform: true,
+            reason: null,
+            currentUsage: 0,
+            limit: -1,
+            remaining: -1
+          };
+          
+        case 'contact_extraction':
+          const canExtractContacts = planLimits.maxContacts === -1 || usage.totalContacts + quantity <= planLimits.maxContacts;
+          return {
+            canPerform: canExtractContacts,
+            reason: canExtractContacts ? null : `You have reached your ${planLimits.maxContacts} contact limit`,
+            currentUsage: usage.totalContacts,
+            limit: planLimits.maxContacts,
+            remaining: planLimits.maxContacts === -1 ? -1 : Math.max(0, planLimits.maxContacts - usage.totalContacts)
+          };
+          
+        default:
+          return {
+            canPerform: true,
+            reason: null,
+            currentUsage: 0,
+            limit: -1,
+            remaining: -1
+          };
+      }
+    } catch (error) {
+      console.error('❌ Error checking action permission:', error);
+      return {
+        canPerform: false,
+        reason: 'Unable to verify permissions',
+        currentUsage: 0,
+        limit: 0,
+        remaining: 0
+      };
+    }
+  }
+
+  /**
+   * Increment usage for a specific action
+   */
+  async incrementUsage(userId, actionType, quantity = 1) {
+    try {
+      console.log(`📈 Incrementing usage for user ${userId}: ${actionType} (quantity: ${quantity})`);
+      
+      switch (actionType) {
+        case 'upload':
+          await this.recordUpload(userId, 0); // We'll update contact count separately
+          break;
+          
+        case 'api_call':
+          await this.recordApiCall(userId);
+          break;
+          
+        case 'contact_extraction':
+          // This is handled when we record the upload with contact count
+          break;
+          
+        default:
+          console.log(`⚠️ Unknown action type: ${actionType}`);
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('❌ Error incrementing usage:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new UsageService();
