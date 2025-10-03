@@ -35,13 +35,16 @@ class QueueService {
       // Generate fileId first
       const fileId = uuidv4();
       
+      // Extract fileBuffer before validation (it's not part of the job schema)
+      const { fileBuffer, ...jobDataWithoutBuffer } = jobData;
+      
       // Add fileId to job data for validation
       const jobDataWithFileId = {
-        ...jobData,
+        ...jobDataWithoutBuffer,
         fileId
       };
 
-      // Validate job data
+      // Validate job data (without fileBuffer)
       const { error, value } = JobSchemas[JobTypes.EXTRACTION].validate(jobDataWithFileId);
       if (error) {
         throw new Error(`Invalid job data: ${error.details[0].message}`);
@@ -51,7 +54,7 @@ class QueueService {
       
       // Save file to temporary storage
       const filePath = path.join(this.tempDir, fileId);
-      await fs.writeFile(filePath, jobData.fileBuffer);
+      await fs.writeFile(filePath, fileBuffer);
 
       // Determine queue based on priority
       const queueName = validatedData.priority === 'urgent' || validatedData.priority === 'high' 
