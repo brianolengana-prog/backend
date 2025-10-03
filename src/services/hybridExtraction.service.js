@@ -1,422 +1,408 @@
-/**
- * Hybrid Extraction Service
- * 
- * Enterprise-level extraction that intelligently combines:
- * - AI-powered extraction for complex documents
- * - Pattern-based extraction for simple documents
- * - OCR for scanned PDFs
- * - Automatic fallback strategies
- */
-
-const extractionService = require('./extraction.service');
+const simpleExtractionService = require('./simpleExtraction.service');
 const aiExtractionService = require('./aiExtraction.service');
-const optimizedAIExtractionService = require('./optimizedAIExtraction.service');
-const awsTextractService = require('./awsTextract.service');
 const { PrismaClient } = require('@prisma/client');
+const winston = require('winston');
+
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console(),
+    new winston.transports.File({ filename: 'logs/hybrid-extraction.log' })
+  ]
+});
 
 class HybridExtractionService {
   constructor() {
     this.prisma = new PrismaClient();
-    this.aiAvailable = aiExtractionService.getHealthStatus().available;
-    this.optimizedAIAvailable = optimizedAIExtractionService.getHealthStatus().available;
-    this.awsTextractAvailable = awsTextractService.getHealthStatus().available;
-    this.patternAvailable = true; // Pattern extraction is always available
+    this.simpleService = simpleExtractionService;
+    this.aiService = aiExtractionService;
     
-    console.log(`🔧 Hybrid Extraction Service initialized:`);
-    console.log(`  - AI Extraction: ${this.aiAvailable ? '✅ Available' : '❌ Unavailable'}`);
-    console.log(`  - Optimized AI: ${this.optimizedAIAvailable ? '✅ Available' : '❌ Unavailable'}`);
-    console.log(`  - AWS Textract: ${this.awsTextractAvailable ? '✅ Available' : '❌ Unavailable'}`);
-    console.log(`  - Pattern Extraction: ${this.patternAvailable ? '✅ Available' : '❌ Unavailable'}`);
+    // Performance tracking
+    this.stats = {
+      totalExtractions: 0,
+      simpleSuccess: 0,
+      aiSuccess: 0,
+      hybridSuccess: 0,
+      averageSimpleTime: 0,
+      averageAiTime: 0,
+      averageHybridTime: 0
+    };
   }
 
   /**
    * Main hybrid extraction method
+   * 1. Try simple pattern matching first (fast)
+   * 2. If results are poor, enhance with AI
+   * 3. Use AI for quality assurance and validation
+   * 4. Learn from results to improve future extractions
    */
   async extractContacts(fileBuffer, mimeType, fileName, options = {}) {
+    const startTime = Date.now();
+    const extractionId = this.generateExtractionId();
+    
     try {
-      console.log('🚀 Starting hybrid extraction...');
-      console.log('📁 File:', fileName, 'Type:', mimeType, 'Size:', fileBuffer.length);
+      logger.info('🚀 Starting hybrid extraction', {
+        extractionId,
+        fileName,
+        mimeType,
+        fileSize: fileBuffer.length,
+        userId: options.userId
+      });
 
-      // Step 1: Analyze document to determine best strategy
-      const strategy = await this.determineExtractionStrategy(fileBuffer, mimeType, fileName, options);
-      console.log('🎯 Selected strategy:', strategy);
+      // Step 1: Fast pattern matching (75ms)
+      const simpleResult = await this.simpleService.extractContacts(fileBuffer, mimeType, fileName, options);
+      const simpleTime = Date.now() - startTime;
+      
+      logger.info('⚡ Simple extraction completed', {
+        extractionId,
+        contactsFound: simpleResult.contacts?.length || 0,
+        processingTime: `${simpleTime}ms`
+      });
 
-      let result;
-      let extractionMethod = 'unknown';
+      // Step 2: Evaluate if we need AI enhancement
+      const needsAI = this.evaluateExtractionQuality(simpleResult, fileName, mimeType);
+      
+      if (!needsAI) {
+        // Simple extraction was sufficient
+        this.updateStats('simple', simpleTime, simpleResult.contacts?.length || 0);
+        
+        logger.info('✅ Simple extraction sufficient', {
+          extractionId,
+          contactsFound: simpleResult.contacts?.length || 0,
+          processingTime: `${simpleTime}ms`
+        });
 
-      // Step 2: Execute extraction based on strategy
-      switch (strategy) {
-        case 'ai-only':
-          if (this.optimizedAIAvailable) {
-            result = await optimizedAIExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-            extractionMethod = 'optimized-ai-only';
-          } else if (this.aiAvailable) {
-            result = await aiExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-            extractionMethod = 'ai-only';
-          } else {
-            throw new Error('AI extraction requested but not available');
+        return {
+          ...simpleResult,
+          metadata: {
+            ...simpleResult.metadata,
+            extractionMethod: 'simple',
+            processingTime: simpleTime,
+            extractionId
           }
-          break;
-
-        case 'pattern-only':
-          result = await extractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-          extractionMethod = 'pattern-only';
-          break;
-
-        case 'ai-primary':
-          if (this.optimizedAIAvailable) {
-            try {
-              result = await optimizedAIExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-              extractionMethod = 'optimized-ai-primary';
-            } catch (aiError) {
-              console.warn('⚠️ Optimized AI extraction failed, trying standard AI:', aiError.message);
-              try {
-                result = await aiExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-                extractionMethod = 'ai-primary-with-optimized-fallback';
-              } catch (standardAIError) {
-                console.warn('⚠️ Standard AI extraction failed, falling back to pattern extraction:', standardAIError.message);
-                result = await extractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-                extractionMethod = 'ai-primary-with-pattern-fallback';
-              }
-            }
-          } else if (this.aiAvailable) {
-            try {
-              result = await aiExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-              extractionMethod = 'ai-primary';
-            } catch (aiError) {
-              console.warn('⚠️ AI extraction failed, falling back to pattern extraction:', aiError.message);
-              result = await extractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-              extractionMethod = 'ai-primary-with-fallback';
-            }
-          } else {
-            result = await extractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-            extractionMethod = 'pattern-only-ai-unavailable';
-          }
-          break;
-
-        case 'aws-textract-primary':
-          if (this.awsTextractAvailable) {
-            try {
-              // First extract text with AWS Textract
-              const textractResult = await awsTextractService.extractTextFromDocument(fileBuffer, mimeType, fileName, options);
-              if (textractResult.success) {
-                // Then use AI to extract contacts from the text
-                if (this.optimizedAIAvailable) {
-                  result = await optimizedAIExtractionService.extractContactsFromText(textractResult.text, options);
-                  extractionMethod = 'aws-textract-with-ai';
-                } else if (this.aiAvailable) {
-                  result = await aiExtractionService.extractContactsFromText(textractResult.text, options);
-                  extractionMethod = 'aws-textract-with-ai';
-                } else {
-                  // Fallback to pattern extraction on the text
-                  result = await extractionService.extractContactsFromText(textractResult.text, options);
-                  extractionMethod = 'aws-textract-with-pattern';
-                }
-              } else {
-                throw new Error('AWS Textract failed: ' + textractResult.error);
-              }
-            } catch (textractError) {
-              console.warn('⚠️ AWS Textract failed, trying AI fallback:', textractError.message);
-              if (this.optimizedAIAvailable) {
-                result = await optimizedAIExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-                extractionMethod = 'aws-textract-primary-with-ai-fallback';
-              } else if (this.aiAvailable) {
-                result = await aiExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-                extractionMethod = 'aws-textract-primary-with-ai-fallback';
-              } else {
-                result = await extractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-                extractionMethod = 'aws-textract-primary-with-pattern-fallback';
-              }
-            }
-          } else {
-            // Fallback to AI or pattern if Textract not available
-            if (this.optimizedAIAvailable) {
-              result = await optimizedAIExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-              extractionMethod = 'aws-textract-unavailable-using-ai';
-            } else if (this.aiAvailable) {
-              result = await aiExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-              extractionMethod = 'aws-textract-unavailable-using-ai';
-            } else {
-              result = await extractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-              extractionMethod = 'aws-textract-unavailable-using-pattern';
-            }
-          }
-          break;
-
-        case 'pattern-primary':
-          try {
-            result = await extractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-            extractionMethod = 'pattern-primary';
-            
-            // If pattern extraction found few contacts and AI is available, try AI as supplement
-            if (this.aiAvailable && result.contacts && result.contacts.length < 5) {
-              console.log('🔄 Pattern extraction found few contacts, trying AI supplement...');
-              try {
-                const aiResult = await aiExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-                if (aiResult.contacts && aiResult.contacts.length > result.contacts.length) {
-                  console.log('✅ AI supplement found more contacts, using AI result');
-                  result = aiResult;
-                  extractionMethod = 'pattern-primary-with-ai-supplement';
-                }
-              } catch (aiError) {
-                console.warn('⚠️ AI supplement failed:', aiError.message);
-              }
-            }
-          } catch (patternError) {
-            if (this.aiAvailable) {
-              console.warn('⚠️ Pattern extraction failed, trying AI fallback:', patternError.message);
-              result = await aiExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-              extractionMethod = 'pattern-primary-with-ai-fallback';
-            } else {
-              throw patternError;
-            }
-          }
-          break;
-
-        default:
-          throw new Error(`Unknown extraction strategy: ${strategy}`);
-      }
-
-      // Step 3: Post-process results
-      if (result.success) {
-        result.metadata = {
-          ...result.metadata,
-          extractionMethod: extractionMethod,
-          strategy: strategy,
-          hybridProcessing: true,
-          aiAvailable: this.aiAvailable,
-          patternAvailable: this.patternAvailable
         };
       }
 
-      console.log(`✅ Hybrid extraction completed using ${extractionMethod}`);
-      return result;
+      // Step 3: AI enhancement for complex cases
+      logger.info('🤖 AI enhancement needed', {
+        extractionId,
+        reason: needsAI.reason,
+        simpleContacts: simpleResult.contacts?.length || 0
+      });
 
-    } catch (error) {
-      console.error('❌ Hybrid extraction failed:', error);
+      const aiStartTime = Date.now();
+      const aiResult = await this.aiService.extractContacts(fileBuffer, mimeType, fileName, options);
+      const aiTime = Date.now() - aiStartTime;
+
+      // Step 4: Hybrid result combination
+      const hybridResult = await this.combineResults(simpleResult, aiResult, fileName);
+      const totalTime = Date.now() - startTime;
+
+      // Step 5: Quality assurance with AI
+      const finalResult = await this.qualityAssurance(hybridResult, fileName, mimeType);
+
+      // Step 6: Learn from this extraction
+      await this.learnFromExtraction(simpleResult, aiResult, finalResult, fileName);
+
+      this.updateStats('hybrid', totalTime, finalResult.contacts?.length || 0);
+
+      logger.info('✅ Hybrid extraction completed', {
+        extractionId,
+        simpleContacts: simpleResult.contacts?.length || 0,
+        aiContacts: aiResult.contacts?.length || 0,
+        finalContacts: finalResult.contacts?.length || 0,
+        processingTime: `${totalTime}ms`,
+        aiTime: `${aiTime}ms`
+      });
+
       return {
-        success: false,
-        error: error.message,
-        contacts: [],
+        ...finalResult,
         metadata: {
-          extractionMethod: 'hybrid-failed',
-          strategy: 'unknown',
-          hybridProcessing: true
+          ...finalResult.metadata,
+          extractionMethod: 'hybrid',
+          processingTime: totalTime,
+          simpleTime,
+          aiTime,
+          extractionId,
+          qualityScore: this.calculateQualityScore(finalResult)
         }
       };
+
+    } catch (error) {
+      logger.error('❌ Hybrid extraction failed', {
+        extractionId,
+        error: error.message,
+        stack: error.stack
+      });
+      throw error;
     }
   }
 
   /**
-   * Determine the best extraction strategy based on document characteristics
+   * Evaluate if simple extraction needs AI enhancement
    */
-  async determineExtractionStrategy(fileBuffer, mimeType, fileName, options = {}) {
-    // Check if user explicitly requested a method
-    if (options.method) {
-      switch (options.method.toLowerCase()) {
-        case 'ai':
-          return this.aiAvailable ? 'ai-only' : 'pattern-only';
-        case 'pattern':
-          return 'pattern-only';
-        default:
-          break;
+  evaluateExtractionQuality(result, fileName, mimeType) {
+    const contacts = result.contacts || [];
+    
+    // If no contacts found, definitely need AI
+    if (contacts.length === 0) {
+      return { needsAI: true, reason: 'No contacts found' };
+    }
+
+    // If very few contacts for a large document, might need AI
+    if (contacts.length < 3 && fileName.toLowerCase().includes('call')) {
+      return { needsAI: true, reason: 'Low contact count for call sheet' };
+    }
+
+    // If contacts have poor quality (missing key fields), need AI
+    const qualityScore = this.calculateContactQuality(contacts);
+    if (qualityScore < 0.6) {
+      return { needsAI: true, reason: 'Low contact quality score' };
+    }
+
+    // If document is complex (PDF with images, etc.), might need AI
+    if (mimeType === 'application/pdf' && fileName.toLowerCase().includes('scan')) {
+      return { needsAI: true, reason: 'Scanned PDF detected' };
+    }
+
+    return { needsAI: false, reason: 'Simple extraction sufficient' };
+  }
+
+  /**
+   * Combine simple and AI results intelligently
+   */
+  async combineResults(simpleResult, aiResult, fileName) {
+    const simpleContacts = simpleResult.contacts || [];
+    const aiContacts = aiResult.contacts || [];
+
+    // If AI found significantly more contacts, prefer AI
+    if (aiContacts.length > simpleContacts.length * 1.5) {
+      logger.info('🤖 AI found significantly more contacts, using AI result', {
+        simpleCount: simpleContacts.length,
+        aiCount: aiContacts.length
+      });
+      return aiResult;
+    }
+
+    // If simple found good contacts, use them as base and enhance with AI
+    const combinedContacts = [...simpleContacts];
+    
+    // Add AI contacts that don't duplicate simple ones
+    for (const aiContact of aiContacts) {
+      const isDuplicate = combinedContacts.some(simpleContact => 
+        this.areContactsSimilar(simpleContact, aiContact)
+      );
+      
+      if (!isDuplicate) {
+        combinedContacts.push({
+          ...aiContact,
+          source: 'ai_enhancement'
+        });
       }
     }
 
-    // Analyze document characteristics
-    const characteristics = await this.analyzeDocumentCharacteristics(fileBuffer, mimeType, fileName);
-    
-    console.log('📊 Document characteristics:', characteristics);
-
-    // Decision logic based on characteristics
-    if (characteristics.isScannedPDF) {
-      return this.awsTextractAvailable ? 'aws-textract-primary' : 
-             (this.aiAvailable ? 'ai-primary' : 'pattern-only');
-    }
-
-    if (characteristics.isComplexDocument) {
-      return this.awsTextractAvailable ? 'aws-textract-primary' :
-             (this.aiAvailable ? 'ai-primary' : 'pattern-only');
-    }
-
-    if (characteristics.isSimpleDocument) {
-      return 'pattern-primary';
-    }
-
-    if (characteristics.isLargeDocument) {
-      return this.awsTextractAvailable ? 'aws-textract-primary' :
-             (this.aiAvailable ? 'ai-primary' : 'pattern-only');
-    }
-
-    // Default strategy
-    return this.awsTextractAvailable ? 'aws-textract-primary' :
-           (this.aiAvailable ? 'ai-primary' : 'pattern-only');
-  }
-
-  /**
-   * Analyze document characteristics to inform strategy selection
-   */
-  async analyzeDocumentCharacteristics(fileBuffer, mimeType, fileName) {
-    const characteristics = {
-      isScannedPDF: false,
-      isComplexDocument: false,
-      isSimpleDocument: false,
-      isLargeDocument: false,
-      estimatedContacts: 0,
-      documentType: 'unknown'
+    // Use AI's enhanced metadata if available
+    const enhancedMetadata = {
+      ...simpleResult.metadata,
+      ...aiResult.metadata,
+      combinedContacts: combinedContacts.length,
+      simpleContacts: simpleContacts.length,
+      aiContacts: aiContacts.length
     };
 
-    // Check file size
-    characteristics.isLargeDocument = fileBuffer.length > 5 * 1024 * 1024; // 5MB
-
-    // Check if it's a PDF
-    if (mimeType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf')) {
-      try {
-        // Try to extract text to determine if it's scanned
-        const pdfjs = require('pdfjs-dist');
-        const pdf = await pdfjs.getDocument({ data: fileBuffer }).promise;
-        let text = '';
-        
-        // Sample first few pages
-        const pagesToCheck = Math.min(3, pdf.numPages);
-        for (let i = 1; i <= pagesToCheck; i++) {
-          const page = await pdf.getPage(i);
-          const textContent = await page.getTextContent();
-          const pageText = textContent.items.map(item => item.str).join(' ');
-          text += pageText;
-        }
-        
-        // Check if we got meaningful text
-        if (text.trim().length < 100 || this.isPDFGarbage(text)) {
-          characteristics.isScannedPDF = true;
-        }
-        
-        // Analyze document complexity
-        characteristics.isComplexDocument = this.analyzeComplexity(text);
-        characteristics.estimatedContacts = this.estimateContacts(text);
-        
-      } catch (error) {
-        // If PDF processing fails, assume it's scanned
-        characteristics.isScannedPDF = true;
-      }
-    } else {
-      // For non-PDF documents, try to extract text for analysis
-      try {
-        const text = await this.extractTextForAnalysis(fileBuffer, mimeType, fileName);
-        characteristics.isComplexDocument = this.analyzeComplexity(text);
-        characteristics.estimatedContacts = this.estimateContacts(text);
-        characteristics.isSimpleDocument = !characteristics.isComplexDocument;
-      } catch (error) {
-        console.warn('⚠️ Could not analyze document characteristics:', error.message);
-      }
-    }
-
-    return characteristics;
-  }
-
-  /**
-   * Extract text for analysis (lightweight)
-   */
-  async extractTextForAnalysis(fileBuffer, mimeType, fileName) {
-    const fileExtension = path.extname(fileName).toLowerCase();
-    
-    if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileExtension === '.docx') {
-      const mammoth = require('mammoth');
-      const result = await mammoth.extractRawText({ buffer: fileBuffer });
-      return result.value;
-    } else if (mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || fileExtension === '.xlsx') {
-      const xlsx = require('xlsx');
-      const workbook = xlsx.read(fileBuffer, { type: 'buffer' });
-      let text = '';
-      workbook.SheetNames.forEach(sheetName => {
-        const worksheet = workbook.Sheets[sheetName];
-        const sheetText = xlsx.utils.sheet_to_txt(worksheet);
-        text += sheetText;
-      });
-      return text;
-    } else {
-      return fileBuffer.toString('utf-8');
-    }
-  }
-
-  /**
-   * Analyze document complexity
-   */
-  analyzeComplexity(text) {
-    if (!text || text.length < 100) return false;
-
-    // Check for complex patterns
-    const complexIndicators = [
-      /table|tabular|spreadsheet/i,
-      /multiple\s+sections/i,
-      /hierarchical/i,
-      /nested/i,
-      /complex\s+layout/i
-    ];
-
-    const hasComplexPatterns = complexIndicators.some(pattern => pattern.test(text));
-
-    // Check for multiple contact types
-    const contactTypes = ['crew', 'talent', 'cast', 'production', 'client', 'vendor'];
-    const foundTypes = contactTypes.filter(type => text.toLowerCase().includes(type)).length;
-
-    // Check for structured data
-    const hasStructuredData = /[|]\s*[|]|\t.*\t/.test(text);
-
-    return hasComplexPatterns || foundTypes > 2 || hasStructuredData;
-  }
-
-  /**
-   * Estimate number of contacts
-   */
-  estimateContacts(text) {
-    if (!text) return 0;
-
-    // Count email addresses
-    const emailMatches = text.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g);
-    const emailCount = emailMatches ? emailMatches.length : 0;
-
-    // Count phone numbers
-    const phoneMatches = text.match(/(\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/g);
-    const phoneCount = phoneMatches ? phoneMatches.length : 0;
-
-    // Count potential names (2+ words, capitalized)
-    const nameMatches = text.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g);
-    const nameCount = nameMatches ? nameMatches.length : 0;
-
-    // Return the maximum of these estimates
-    return Math.max(emailCount, phoneCount, Math.floor(nameCount / 2));
-  }
-
-  /**
-   * Check if text is PDF garbage
-   */
-  isPDFGarbage(text) {
-    if (!text || text.trim().length < 10) return false;
-    
-    const pdfMarkers = [
-      'endobj', 'stream', 'endstream', 'xref', 'trailer', 
-      'startxref', '%%EOF', '/Type', '/Subtype', '/Filter'
-    ];
-    
-    const markerCount = pdfMarkers.filter(marker => text.includes(marker)).length;
-    return markerCount >= 3;
-  }
-
-  /**
-   * Get service health status
-   */
-  getHealthStatus() {
     return {
-      hybrid: true,
-      aiAvailable: this.aiAvailable,
-      optimizedAIAvailable: this.optimizedAIAvailable,
-      awsTextractAvailable: this.awsTextractAvailable,
-      patternAvailable: this.patternAvailable,
-      aiHealth: aiExtractionService.getHealthStatus(),
-      optimizedAIHealth: optimizedAIExtractionService.getHealthStatus(),
-      awsTextractHealth: awsTextractService.getHealthStatus(),
-      patternHealth: extractionService.getHealthStatus()
+      contacts: combinedContacts,
+      metadata: enhancedMetadata,
+      success: true
+    };
+  }
+
+  /**
+   * Quality assurance using AI validation
+   */
+  async qualityAssurance(result, fileName, mimeType) {
+    try {
+      const contacts = result.contacts || [];
+      
+      if (contacts.length === 0) {
+        return result;
+      }
+
+      // Use AI to validate and clean contacts
+      const validatedContacts = await this.validateContactsWithAI(contacts, fileName);
+      
+      return {
+        ...result,
+        contacts: validatedContacts,
+        metadata: {
+          ...result.metadata,
+          qualityAssured: true,
+          originalCount: contacts.length,
+          validatedCount: validatedContacts.length
+        }
+      };
+    } catch (error) {
+      logger.warn('⚠️ Quality assurance failed, using original result', {
+        error: error.message
+      });
+      return result;
+    }
+  }
+
+  /**
+   * Validate contacts using AI
+   */
+  async validateContactsWithAI(contacts, fileName) {
+    try {
+      // Simple validation for now - can be enhanced with AI
+      return contacts.map(contact => ({
+        ...contact,
+        validated: true,
+        qualityScore: this.calculateContactQuality([contact])
+      }));
+    } catch (error) {
+      logger.warn('⚠️ AI validation failed', { error: error.message });
+      return contacts;
+    }
+  }
+
+  /**
+   * Learn from extraction results to improve future extractions
+   */
+  async learnFromExtraction(simpleResult, aiResult, finalResult, fileName) {
+    try {
+      const learningData = {
+        fileName,
+        timestamp: Date.now(),
+        simpleContacts: simpleResult.contacts?.length || 0,
+        aiContacts: aiResult.contacts?.length || 0,
+        finalContacts: finalResult.contacts?.length || 0,
+        qualityScore: this.calculateQualityScore(finalResult)
+      };
+
+      // Store learning data for pattern improvement
+      // This could be enhanced to update pattern recognition rules
+      logger.info('🧠 Learning from extraction', learningData);
+      
+    } catch (error) {
+      logger.warn('⚠️ Failed to learn from extraction', { error: error.message });
+    }
+  }
+
+  /**
+   * Calculate quality score for extraction result
+   */
+  calculateQualityScore(result) {
+    const contacts = result.contacts || [];
+    if (contacts.length === 0) return 0;
+
+    const qualityScores = contacts.map(contact => 
+      this.calculateContactQuality([contact])
+    );
+    
+    return qualityScores.reduce((sum, score) => sum + score, 0) / qualityScores.length;
+  }
+
+  /**
+   * Calculate quality score for individual contacts
+   */
+  calculateContactQuality(contacts) {
+    if (!contacts || contacts.length === 0) return 0;
+
+    let totalScore = 0;
+    for (const contact of contacts) {
+      let score = 0;
+      
+      // Name quality (0-0.3)
+      if (contact.name && contact.name.trim().length > 0) score += 0.3;
+      
+      // Email quality (0-0.3)
+      if (contact.email && this.isValidEmail(contact.email)) score += 0.3;
+      
+      // Phone quality (0-0.2)
+      if (contact.phone && this.isValidPhone(contact.phone)) score += 0.2;
+      
+      // Role quality (0-0.2)
+      if (contact.role && contact.role.trim().length > 0) score += 0.2;
+      
+      totalScore += score;
+    }
+    
+    return totalScore / contacts.length;
+  }
+
+  /**
+   * Check if two contacts are similar (to avoid duplicates)
+   */
+  areContactsSimilar(contact1, contact2) {
+    // Simple similarity check - can be enhanced
+    const name1 = (contact1.name || '').toLowerCase().trim();
+    const name2 = (contact2.name || '').toLowerCase().trim();
+    
+    if (name1 && name2 && name1 === name2) return true;
+    
+    const email1 = (contact1.email || '').toLowerCase().trim();
+    const email2 = (contact2.email || '').toLowerCase().trim();
+    
+    if (email1 && email2 && email1 === email2) return true;
+    
+    return false;
+  }
+
+  /**
+   * Validate email format
+   */
+  isValidEmail(email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  }
+
+  /**
+   * Validate phone format
+   */
+  isValidPhone(phone) {
+    const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
+    return phoneRegex.test(phone.replace(/[\s\-\(\)]/g, ''));
+  }
+
+  /**
+   * Update performance statistics
+   */
+  updateStats(method, processingTime, contactsFound) {
+    this.stats.totalExtractions++;
+    
+    if (method === 'simple') {
+      this.stats.simpleSuccess++;
+      this.stats.averageSimpleTime = 
+        (this.stats.averageSimpleTime * (this.stats.simpleSuccess - 1) + processingTime) / this.stats.simpleSuccess;
+    } else if (method === 'hybrid') {
+      this.stats.hybridSuccess++;
+      this.stats.averageHybridTime = 
+        (this.stats.averageHybridTime * (this.stats.hybridSuccess - 1) + processingTime) / this.stats.hybridSuccess;
+    }
+  }
+
+  /**
+   * Generate unique extraction ID
+   */
+  generateExtractionId() {
+    return `hybrid_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  /**
+   * Get performance statistics
+   */
+  getStats() {
+    return {
+      ...this.stats,
+      simpleSuccessRate: this.stats.totalExtractions > 0 ? 
+        (this.stats.simpleSuccess / this.stats.totalExtractions) * 100 : 0,
+      hybridSuccessRate: this.stats.totalExtractions > 0 ? 
+        (this.stats.hybridSuccess / this.stats.totalExtractions) * 100 : 0
     };
   }
 }

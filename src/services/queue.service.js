@@ -3,6 +3,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const queueManager = require('../config/queue');
 const { JobTypes, JobSchemas } = require('../types/jobTypes');
+const hybridExtractionService = require('./hybridExtraction.service');
 const winston = require('winston');
 
 const logger = winston.createLogger({

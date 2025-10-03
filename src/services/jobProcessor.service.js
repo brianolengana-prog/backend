@@ -65,15 +65,15 @@ class JobProcessorService {
       const filePath = path.join(__dirname, '../temp', fileId);
       const fileBuffer = await fs.readFile(filePath);
 
-      // Process extraction using simple, reliable service
-      logger.info('🔍 Using simple extraction service', {
+      // Process extraction using hybrid service (simple + AI when needed)
+      logger.info('🔍 Using hybrid extraction service', {
         jobId,
         fileName,
         fileType,
         extractionMethod
       });
 
-      const result = await simpleExtractionService.extractContacts(
+      const result = await hybridExtractionService.extractContacts(
         fileBuffer, 
         `application/${fileType}`, 
         fileName, 

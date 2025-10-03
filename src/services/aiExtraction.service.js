@@ -95,7 +95,10 @@ class AIExtractionService {
       // First try standard PDF text extraction
       try {
         const pdfjs = require('pdfjs-dist');
-        const pdf = await pdfjs.getDocument({ data: fileBuffer }).promise;
+        
+        // Convert Buffer to Uint8Array for PDF.js compatibility
+        const uint8Array = new Uint8Array(fileBuffer);
+        const pdf = await pdfjs.getDocument({ data: uint8Array }).promise;
         let fullText = '';
         
         for (let i = 1; i <= pdf.numPages; i++) {
@@ -145,7 +148,10 @@ class AIExtractionService {
       // Try to extract any text that might be embedded
       const pdfjsModule = await import('pdfjs-dist');
       const pdfjs = pdfjsModule.default || pdfjsModule;
-      const pdf = await pdfjs.getDocument({ data: fileBuffer }).promise;
+      
+      // Convert Buffer to Uint8Array for PDF.js compatibility
+      const uint8Array = new Uint8Array(fileBuffer);
+      const pdf = await pdfjs.getDocument({ data: uint8Array }).promise;
       let fullText = '';
       
       for (let i = 1; i <= pdf.numPages; i++) {
