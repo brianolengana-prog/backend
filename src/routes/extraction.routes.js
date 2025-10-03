@@ -72,6 +72,20 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     const userId = req.user.id;
     const { rolePreferences, options, extractionMethod = 'hybrid', priority = 'normal' } = req.body;
     
+    // Parse options if it's a string
+    let parsedOptions = {};
+    if (options) {
+      try {
+        parsedOptions = typeof options === 'string' ? JSON.parse(options) : options;
+        console.log('📁 Parsed options:', parsedOptions);
+      } catch (error) {
+        console.warn('⚠️ Failed to parse options, using empty object:', error.message);
+        parsedOptions = {};
+      }
+    } else {
+      console.log('📁 No options provided, using empty object');
+    }
+    
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -82,6 +96,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     console.log('📁 File upload received:', req.file.originalname);
     console.log('📁 File type:', req.file.mimetype);
     console.log('📁 File size:', req.file.size);
+    console.log('📁 Options received:', options, 'Type:', typeof options);
 
     // Check usage limits before processing
     const canProcess = await usageService.canPerformAction(userId, 'upload', 1);
@@ -114,7 +129,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       fileSize: req.file.size,
       extractionMethod,
       priority,
-      options: options || {},
+      options: parsedOptions,
       fileBuffer: req.file.buffer,
       metadata: {
         source: 'api',
