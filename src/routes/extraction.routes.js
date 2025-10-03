@@ -14,6 +14,7 @@ const optimizedAIExtractionService = require('../services/optimizedAIExtraction.
 const awsTextractService = require('../services/awsTextract.service');
 const hybridExtractionService = require('../services/hybridExtraction.service');
 const usageService = require('../services/usage.service');
+const queueService = require('../services/queue.service');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
@@ -64,12 +65,12 @@ ensureUploadDir();
 
 /**
  * POST /api/extraction/upload
- * Upload and extract contacts from call sheet file
+ * Upload and extract contacts from call sheet file (Async Queue-based)
  */
 router.post('/upload', upload.single('file'), async (req, res) => {
   try {
     const userId = req.user.id;
-    const { rolePreferences, options } = req.body;
+    const { rolePreferences, options, extractionMethod = 'hybrid', priority = 'normal' } = req.body;
     
     if (!req.file) {
       return res.status(400).json({
@@ -92,81 +93,60 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       });
     }
 
-    // Process the uploaded file (using memory buffer)
-    const fileBuffer = req.file.buffer;
-    
-    // Use hybrid extraction service for optimal results
-    const result = await hybridExtractionService.extractContacts(
-      fileBuffer, 
-      req.file.mimetype, 
-      req.file.originalname, 
-      options || {}
-    );
+    // Determine file type from mimetype
+    const fileTypeMap = {
+      'application/pdf': 'pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+      'text/csv': 'csv',
+      'image/jpeg': 'image',
+      'image/png': 'image',
+      'image/tiff': 'image'
+    };
 
-    if (!result.success) {
+    const fileType = fileTypeMap[req.file.mimetype] || 'pdf';
+
+    // Add job to queue
+    const jobResult = await queueService.addExtractionJob({
+      userId,
+      fileName: req.file.originalname,
+      fileType,
+      fileSize: req.file.size,
+      extractionMethod,
+      priority,
+      options: options || {},
+      fileBuffer: req.file.buffer,
+      metadata: {
+        source: 'api',
+        userAgent: req.get('User-Agent'),
+        ipAddress: req.ip
+      }
+    });
+
+    if (!jobResult.success) {
       return res.status(500).json({
         success: false,
-        error: result.error
+        error: jobResult.error
       });
     }
 
-    // Save extracted contacts to database
-    let jobId = null;
-    if (result.contacts && result.contacts.length > 0) {
-      try {
-        // Create a job record for this extraction
-        const job = await prisma.job.create({
-          data: {
-            userId,
-            title: `File Upload - ${req.file.originalname}`,
-            fileName: req.file.originalname,
-            status: 'COMPLETED'
-          }
-        });
-
-        jobId = job.id;
-
-        // Save contacts to database
-        await extractionService.saveContacts(result.contacts, userId, jobId);
-
-        // Update usage tracking
-        await usageService.incrementUsage(userId, 'upload', 1);
-
-        console.log('✅ Contacts saved to database:', result.contacts.length);
-
-      } catch (dbError) {
-        console.error('❌ Database save error:', dbError);
-        return res.status(500).json({
-          success: false,
-          error: 'Failed to save contacts to database'
-        });
-      }
-    }
-
-    // No cleanup needed with memory storage
+    console.log('✅ File queued for processing:', jobResult.jobId);
 
     res.json({
       success: true,
-      contacts: result.contacts,
-      jobId: jobId,
-      metadata: result.metadata
+      jobId: jobResult.jobId,
+      fileId: jobResult.fileId,
+      status: 'queued',
+      estimatedProcessingTime: jobResult.estimatedProcessingTime,
+      message: 'File has been queued for processing. Use the job ID to check status.'
     });
 
   } catch (error) {
-    console.error('❌ File upload extraction error:', error);
-    
-    // Clean up uploaded file on error
-    if (req.file) {
-      try {
-        await fs.unlink(req.file.path);
-      } catch (cleanupError) {
-        console.warn('⚠️ Failed to clean up uploaded file after error:', cleanupError.message);
-      }
-    }
+    console.error('❌ File upload error:', error);
     
     res.status(500).json({
       success: false,
-      error: 'File processing failed'
+      error: 'File upload failed'
     });
   }
 });
@@ -757,6 +737,144 @@ router.get('/health', (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Health check failed'
+    });
+  }
+});
+
+/**
+ * GET /api/extraction/job/:jobId
+ * Get job status and results
+ */
+router.get('/job/:jobId', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const userId = req.user.id;
+
+    const jobStatus = await queueService.getJobStatus(jobId);
+    
+    if (!jobStatus.success) {
+      return res.status(404).json({
+        success: false,
+        error: jobStatus.error
+      });
+    }
+
+    // Verify job belongs to user
+    if (jobStatus.data.userId !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // If job is completed, get the results
+    let results = null;
+    if (jobStatus.status === 'completed') {
+      try {
+        const job = await prisma.job.findFirst({
+          where: { externalJobId: jobId },
+          include: {
+            contacts: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                phone: true,
+                role: true,
+                company: true,
+                department: true,
+                confidence: true
+              }
+            }
+          }
+        });
+
+        if (job) {
+          results = {
+            jobId: job.id,
+            contacts: job.contacts,
+            metadata: job.metadata
+          };
+        }
+      } catch (dbError) {
+        console.error('❌ Error fetching job results:', dbError);
+      }
+    }
+
+    res.json({
+      success: true,
+      jobId: jobStatus.jobId,
+      status: jobStatus.status,
+      progress: jobStatus.progress,
+      results,
+      createdAt: jobStatus.createdAt,
+      processedAt: jobStatus.processedAt,
+      failedAt: jobStatus.failedAt
+    });
+
+  } catch (error) {
+    console.error('❌ Job status error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get job status'
+    });
+  }
+});
+
+/**
+ * DELETE /api/extraction/job/:jobId
+ * Cancel a queued job
+ */
+router.delete('/job/:jobId', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const userId = req.user.id;
+
+    // First check if job belongs to user
+    const jobStatus = await queueService.getJobStatus(jobId);
+    if (!jobStatus.success || jobStatus.data.userId !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    const cancelResult = await queueService.cancelJob(jobId);
+    
+    if (!cancelResult.success) {
+      return res.status(400).json({
+        success: false,
+        error: cancelResult.error
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Job cancelled successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Cancel job error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to cancel job'
+    });
+  }
+});
+
+/**
+ * GET /api/extraction/queue/stats
+ * Get queue statistics (admin only)
+ */
+router.get('/queue/stats', async (req, res) => {
+  try {
+    const stats = await queueService.getQueueStats();
+    res.json(stats);
+  } catch (error) {
+    console.error('❌ Queue stats error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get queue statistics'
     });
   }
 });
