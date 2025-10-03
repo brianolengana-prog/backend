@@ -35,6 +35,15 @@ class AIExtractionService {
     }
 
     try {
+      // Hard skip AI for tabular formats when disabled via env
+      const isTabular = mimeType === 'text/csv' ||
+        mimeType === 'application/vnd.ms-excel' ||
+        mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      const aiEnabledForXlsx = process.env.AI_ENABLED_FOR_XLSX !== 'false';
+      if (isTabular && !aiEnabledForXlsx) {
+        return { success: true, contacts: [], metadata: { aiSkipped: 'tabular' } };
+      }
+
       console.log('🤖 Starting AI-powered extraction...');
       console.log('📁 File:', fileName, 'Type:', mimeType, 'Size:', fileBuffer.length);
 
@@ -51,8 +60,11 @@ class AIExtractionService {
       const documentAnalysis = await this.analyzeDocumentWithAI(extractedText, fileName);
       console.log('🧠 AI document analysis:', documentAnalysis);
 
-      // Step 3: AI Contact Extraction
-      const contacts = await this.extractContactsWithAI(extractedText, documentAnalysis, options);
+      // Step 3: AI Contact Extraction with global caps
+      const maxChunks = Number(options?.aiOptions?.maxChunks ?? process.env.AI_MAX_CHUNKS ?? 20);
+      const chunkSize = Number(options?.aiOptions?.chunkSize ?? process.env.AI_CHUNK_SIZE ?? 4000);
+      const earlyExitOnZero = (options?.aiOptions?.earlyExitOnZero ?? (process.env.AI_EARLY_EXIT_ON_ZERO_CONTACTS !== 'false'));
+      const contacts = await this.extractContactsWithAI(extractedText, documentAnalysis, { ...options, maxChunks, chunkSize, earlyExitOnZero });
 
       // Step 4: AI Quality Validation
       const validatedContacts = await this.validateContactsWithAI(contacts, extractedText, documentAnalysis);
@@ -255,8 +267,13 @@ Provide analysis in JSON format:
    * AI-powered contact extraction
    */
   async extractContactsWithAI(text, documentAnalysis, options = {}) {
-    // Smart text chunking to avoid token limits
-    const textChunks = this.chunkTextForAI(text, 3000);
+    // Smart text chunking to avoid token limits (honor caps)
+    const chunkSize = Number(options?.chunkSize ?? 4000);
+    const maxChunks = Number(options?.maxChunks ?? 20);
+    const earlyExitOnZero = options?.earlyExitOnZero !== false;
+
+    const allChunks = this.chunkTextForAI(text, chunkSize);
+    const textChunks = maxChunks > 0 ? allChunks.slice(0, maxChunks) : [];
     let allContacts = [];
     
     for (let i = 0; i < textChunks.length; i++) {
@@ -282,10 +299,13 @@ Provide analysis in JSON format:
         const chunkContacts = JSON.parse(response.choices[0].message.content);
         allContacts = allContacts.concat(chunkContacts);
         
-        // Add delay between chunks to respect rate limits
-        if (i < textChunks.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+        // Early exit if no contacts after first few chunks
+        if (earlyExitOnZero && allContacts.length === 0 && i + 1 >= Math.min(3, textChunks.length)) {
+          console.log('⚠️ Early exit: no contacts found in initial chunks');
+          break;
         }
+        // Small delay between chunks
+        if (i < textChunks.length - 1) await new Promise(resolve => setTimeout(resolve, 300));
       } catch (error) {
         console.warn(`⚠️ AI chunk ${i + 1} failed:`, error.message);
       }

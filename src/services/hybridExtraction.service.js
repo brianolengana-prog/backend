@@ -72,11 +72,11 @@ class HybridExtractionService {
       const aiEnabledForXlsx = process.env.AI_ENABLED_FOR_XLSX !== 'false';
       const disableAi = process.env.DISABLE_AI === 'true';
 
-      const needsAI = isTabular && !aiEnabledForXlsx
+      const aiDecision = isTabular && !aiEnabledForXlsx
         ? { needsAI: false, reason: 'Tabular document - custom parser preferred' }
         : (disableAi ? { needsAI: false, reason: 'AI disabled by env' } : this.evaluateExtractionQuality(simpleResult, fileName, mimeType));
       
-      if (!needsAI) {
+      if (!aiDecision.needsAI) {
         // Simple extraction was sufficient
         this.updateStats('simple', simpleTime, simpleResult.contacts?.length || 0);
         
@@ -100,7 +100,7 @@ class HybridExtractionService {
       // Step 3: AI enhancement for complex cases
       logger.info('🤖 AI enhancement needed', {
         extractionId,
-        reason: needsAI.reason,
+        reason: aiDecision.reason,
         simpleContacts: simpleResult.contacts?.length || 0
       });
 
