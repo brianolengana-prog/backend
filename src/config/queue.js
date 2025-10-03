@@ -10,7 +10,29 @@ class QueueManager {
       password: env.REDIS_PASSWORD,
       retryDelayOnFailover: 100,
       maxRetriesPerRequest: 3,
-      lazyConnect: true
+      lazyConnect: true,
+      connectTimeout: 10000,
+      commandTimeout: 5000,
+      retryDelayOnClusterDown: 300,
+      enableReadyCheck: false,
+      maxRetriesPerRequest: null
+    });
+
+    // Add Redis connection event handlers
+    this.redis.on('connect', () => {
+      console.log('✅ Redis connected');
+    });
+
+    this.redis.on('ready', () => {
+      console.log('✅ Redis ready');
+    });
+
+    this.redis.on('error', (err) => {
+      console.error('❌ Redis error:', err.message);
+    });
+
+    this.redis.on('close', () => {
+      console.warn('⚠️ Redis connection closed');
     });
 
     this.queues = new Map();
@@ -72,6 +94,17 @@ class QueueManager {
 
   getQueue(name) {
     return this.queues.get(name);
+  }
+
+  async testConnection() {
+    try {
+      await this.redis.ping();
+      console.log('✅ Redis ping successful');
+      return true;
+    } catch (error) {
+      console.error('❌ Redis ping failed:', error.message);
+      return false;
+    }
   }
 
   async close() {

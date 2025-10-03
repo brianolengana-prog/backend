@@ -121,31 +121,76 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
     const fileType = fileTypeMap[req.file.mimetype] || 'pdf';
 
-    // Add job to queue
-    const jobResult = await queueService.addExtractionJob({
-      userId,
-      fileName: req.file.originalname,
-      fileType,
-      fileSize: req.file.size,
-      extractionMethod,
-      priority,
-      options: parsedOptions,
-      fileBuffer: req.file.buffer,
-      metadata: {
-        source: 'api',
-        userAgent: req.get('User-Agent'),
-        ipAddress: req.ip
-      }
-    });
-
-    if (!jobResult.success) {
-      return res.status(500).json({
-        success: false,
-        error: jobResult.error
+    // Try to add job to queue first
+    let jobResult;
+    try {
+      jobResult = await queueService.addExtractionJob({
+        userId,
+        fileName: req.file.originalname,
+        fileType,
+        fileSize: req.file.size,
+        extractionMethod,
+        priority,
+        options: parsedOptions,
+        fileBuffer: req.file.buffer,
+        metadata: {
+          source: 'api',
+          userAgent: req.get('User-Agent'),
+          ipAddress: req.ip
+        }
       });
-    }
 
-    console.log('✅ File queued for processing:', jobResult.jobId);
+      if (!jobResult.success) {
+        throw new Error(jobResult.error);
+      }
+
+      console.log('✅ File queued for processing:', jobResult.jobId);
+    } catch (queueError) {
+      console.warn('⚠️ Queue processing failed, falling back to synchronous processing:', queueError.message);
+      
+      // Fallback to synchronous processing
+      try {
+        const hybridExtractionService = require('../services/hybridExtraction.service');
+        
+        console.log('🔄 Processing file synchronously...');
+        const result = await hybridExtractionService.extractContacts(
+          req.file.buffer,
+          req.file.mimetype,
+          req.file.originalname,
+          { userId, ...parsedOptions }
+        );
+
+        if (!result.success) {
+          throw new Error(result.error || 'Extraction failed');
+        }
+
+        // Update usage tracking
+        await usageService.incrementUsage(userId, 'upload', 1);
+        if (result.contacts && result.contacts.length > 0) {
+          await usageService.incrementUsage(userId, 'contact_extraction', result.contacts.length);
+        }
+
+        console.log('✅ Synchronous processing completed successfully');
+
+        return res.json({
+          success: true,
+          jobId: `sync_${Date.now()}`,
+          status: 'completed',
+          result: {
+            contacts: result.contacts || [],
+            metadata: result.metadata || {},
+            processingTime: result.metadata?.processingTime || 0
+          }
+        });
+
+      } catch (syncError) {
+        console.error('❌ Synchronous processing also failed:', syncError.message);
+        return res.status(500).json({
+          success: false,
+          error: `Both queue and synchronous processing failed: ${syncError.message}`
+        });
+      }
+    }
 
     res.json({
       success: true,

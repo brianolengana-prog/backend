@@ -64,7 +64,21 @@ class QueueService {
 
       const queue = queueManager.getQueue(queueName);
 
-      // Add job to queue with timeout
+      // Test Redis connection before adding job
+      try {
+        const isConnected = await queueManager.testConnection();
+        if (!isConnected) {
+          throw new Error('Redis connection test failed');
+        }
+        
+        await queue.isReady();
+        console.log('✅ Queue is ready, adding job...');
+      } catch (queueError) {
+        console.error('❌ Queue not ready:', queueError.message);
+        throw new Error(`Queue connection failed: ${queueError.message}`);
+      }
+
+      // Add job to queue with increased timeout
       console.log('🔄 Adding job to queue:', queueName);
       const job = await Promise.race([
         queue.add(JobTypes.EXTRACTION, {
@@ -76,7 +90,7 @@ class QueueService {
           delay: 0
         }),
         new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Job addition timeout')), 10000)
+          setTimeout(() => reject(new Error('Job addition timeout - Redis connection may be slow')), 30000)
         )
       ]);
 
