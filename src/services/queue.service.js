@@ -64,6 +64,7 @@ class QueueService {
       const queue = queueManager.getQueue(queueName);
 
       // Add job to queue
+      console.log('🔄 Adding job to queue:', queueName);
       const job = await queue.add(JobTypes.EXTRACTION, {
         ...validatedData,
         fileId,
@@ -73,6 +74,7 @@ class QueueService {
         delay: 0
       });
 
+      console.log('✅ Job added to queue successfully:', job.id);
       logger.info('Extraction job added to queue', {
         jobId: job.id,
         userId: validatedData.userId,

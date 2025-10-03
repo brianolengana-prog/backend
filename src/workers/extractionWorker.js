@@ -31,12 +31,14 @@ class ExtractionWorker {
     // Start main extraction queue worker
     const extractionQueue = queueManager.getQueue('extraction');
     const extractionWorker = extractionQueue.process('extraction', 5, async (job) => {
+      console.log('🔄 Processing extraction job:', job.id, job.data.fileName);
       return await jobProcessor.processExtractionJob(job);
     });
 
     // Start priority queue worker
     const priorityQueue = queueManager.getQueue('extraction-priority');
     const priorityWorker = priorityQueue.process('extraction', 10, async (job) => {
+      console.log('🔄 Processing priority extraction job:', job.id, job.data.fileName);
       return await jobProcessor.processExtractionJob(job);
     });
 
