@@ -447,15 +447,67 @@ class ExtractionService {
           confidence: 0.9
         })
       },
-      // Pattern 2: Role: Name / Phone
+      // Pattern 2: Role: Name / Phone (simple format)
       {
         regex: /^([^:]+):\s*([^\/]+)\s*\/\s*(.+)/,
+        extract: (match) => {
+          // Check if this is the complex format (Name / Company / Phone)
+          if (match[2].includes('/') && match[3].includes('/')) {
+            return null; // Let pattern 2.5 handle this
+          }
+          return {
+            role: match[1].trim(),
+            name: this.normalizeName(match[2]),
+            phone: this.extractPhone(match[3]),
+            confidence: 0.85
+          };
+        }
+      },
+      // Pattern 2.5: Role: Name / Company / Phone (for call sheets)
+      {
+        regex: /^([^:]+):\s*([^\/]+)\s*\/\s*([^\/]+)\s*\/\s*(.+)/,
         extract: (match) => ({
           role: match[1].trim(),
           name: this.normalizeName(match[2]),
-          phone: this.extractPhone(match[3]),
-          confidence: 0.85
+          company: match[3].trim(),
+          phone: this.extractPhone(match[4]),
+          confidence: 0.9
         })
+      },
+      // Pattern 2.6: Role: Name1 / Name2 / Phone (for models with agents)
+      {
+        regex: /^([^:]+):\s*([^\/]+)\s*\/\s*([^\/]+)\s*\/\s*(.+)/,
+        extract: (match) => {
+          const role = match[1].trim();
+          const name1 = this.normalizeName(match[2]);
+          const name2 = this.normalizeName(match[3]);
+          const phone = this.extractPhone(match[4]);
+          
+          // Return both contacts if both have names
+          if (name1 && name2) {
+            return [
+              {
+                role: role,
+                name: name1,
+                phone: phone,
+                confidence: 0.85
+              },
+              {
+                role: `${role} Agent`,
+                name: name2,
+                phone: phone,
+                confidence: 0.85
+              }
+            ];
+          } else {
+            return {
+              role: role,
+              name: name1 || name2,
+              phone: phone,
+              confidence: 0.85
+            };
+          }
+        }
       },
       // Pattern 3: Name | Email | Phone | Role
       {
@@ -512,13 +564,20 @@ class ExtractionService {
         const match = line.match(pattern.regex);
         if (match) {
           const contact = pattern.extract(match);
-          if (this.isValidContact(contact)) {
-            contact.lineNumber = i + 1;
-            contact.rawLine = line;
-            contacts.push(contact);
-            contactFound = true;
-            break;
+          
+          // Handle both single contact and array of contacts
+          const contactsToAdd = Array.isArray(contact) ? contact : [contact];
+          
+          for (const contactItem of contactsToAdd) {
+            if (this.isValidContact(contactItem)) {
+              contactItem.lineNumber = i + 1;
+              contactItem.rawLine = line;
+              contacts.push(contactItem);
+              contactFound = true;
+            }
           }
+          
+          if (contactFound) break;
         }
       }
       

@@ -14,6 +14,9 @@ const extractionService = require('./extraction.service');
 const aiExtractionService = require('./aiExtraction.service');
 const optimizedAIExtractionService = require('./optimizedAIExtraction.service');
 const awsTextractService = require('./awsTextract.service');
+const documentAnalysisService = require('./documentAnalysis.service');
+const adaptivePatternService = require('./adaptivePattern.service');
+const contextAwareAIService = require('./contextAwareAI.service');
 const { PrismaClient } = require('@prisma/client');
 const winston = require('winston');
 
@@ -46,14 +49,14 @@ class OptimizedHybridExtractionService {
   }
 
   /**
-   * Main optimized extraction method
+   * Main optimized extraction method with intelligent context awareness
    */
   async extractContacts(fileBuffer, mimeType, fileName, options = {}) {
     const startTime = Date.now();
     const extractionId = this.generateExtractionId();
 
     try {
-      logger.info('🚀 Starting optimized hybrid extraction', {
+      logger.info('🚀 Starting intelligent hybrid extraction', {
         extractionId,
         fileName,
         mimeType,
@@ -61,38 +64,65 @@ class OptimizedHybridExtractionService {
         userId: options.userId
       });
 
-      // Step 1: Intelligent strategy selection
+      // Step 1: Document analysis for context awareness
+      const extractedText = await this.extractTextFromDocument(fileBuffer, mimeType);
+      const documentAnalysis = await documentAnalysisService.analyzeDocument(
+        extractedText, 
+        fileName, 
+        mimeType
+      );
+
+      // Step 2: Generate adaptive patterns based on analysis
+      const adaptivePatterns = await adaptivePatternService.generatePatterns(
+        documentAnalysis, 
+        extractedText
+      );
+
+      // Step 3: Intelligent strategy selection with context
       const strategy = await this.strategyService.selectOptimalStrategy(
         fileBuffer, 
         mimeType, 
         fileName, 
-        options
+        {
+          ...options,
+          documentAnalysis,
+          adaptivePatterns
+        }
       );
 
-      logger.info('🎯 Selected strategy', {
+      logger.info('🎯 Selected context-aware strategy', {
         extractionId,
         strategy: strategy.name,
         confidence: strategy.confidence,
-        reasoning: strategy.reasoning
+        reasoning: strategy.reasoning,
+        documentStructure: documentAnalysis.documentStructure
       });
 
-      // Step 2: Execute extraction with monitoring
-      const result = await this.executeExtractionWithMonitoring(
-        strategy,
-        fileBuffer,
-        mimeType,
-        fileName,
-        options,
-        extractionId
-      );
+      // Step 4: Execute extraction with full context
+      let result;
+      if (strategy.name === 'context_aware_ai' || documentAnalysis.confidence > 0.8) {
+        result = await contextAwareAIService.extractContacts(fileBuffer, mimeType, fileName, {
+          ...options,
+          documentAnalysis,
+          adaptivePatterns
+        });
+      } else {
+        result = await this.executeExtractionWithMonitoring(
+          strategy,
+          fileBuffer,
+          mimeType,
+          fileName,
+          options,
+          extractionId
+        );
+      }
 
-      // Step 3: Post-process and validate results
-      const finalResult = await this.postProcessResults(
+      // Step 5: Post-process with context awareness
+      const finalResult = await this.postProcessWithContext(
         result,
         strategy,
-        fileBuffer,
-        mimeType,
-        fileName,
+        documentAnalysis,
+        adaptivePatterns,
         options,
         extractionId
       );
@@ -528,6 +558,75 @@ class OptimizedHybridExtractionService {
   /**
    * Get service health status
    */
+  /**
+   * Extract text from document
+   */
+  async extractTextFromDocument(fileBuffer, mimeType) {
+    return await extractionService.extractTextFromDocument(fileBuffer, mimeType);
+  }
+
+  /**
+   * Post-process results with context awareness
+   */
+  async postProcessWithContext(result, strategy, documentAnalysis, adaptivePatterns, options, extractionId) {
+    try {
+      // Enhanced post-processing with context
+      const enhancedResult = await this.postProcessResults(result, strategy, options, extractionId);
+      
+      // Add context metadata
+      enhancedResult.metadata = {
+        ...enhancedResult.metadata,
+        documentAnalysis,
+        adaptivePatterns: adaptivePatterns.length,
+        contextAware: true,
+        extractionId
+      };
+
+      // Learn from this extraction
+      await this.learnFromExtraction(documentAnalysis, enhancedResult, options.fileName || 'unknown');
+
+      return enhancedResult;
+    } catch (error) {
+      logger.error('❌ Context-aware post-processing failed', { error: error.message });
+      return result;
+    }
+  }
+
+  /**
+   * Learn from extraction for continuous improvement
+   */
+  async learnFromExtraction(documentAnalysis, result, fileName) {
+    try {
+      // Update pattern performance
+      if (result.contacts && result.contacts.length > 0) {
+        for (const contact of result.contacts) {
+          if (contact.patternId) {
+            adaptivePatternService.updatePatternPerformance(contact.patternId, true);
+          }
+        }
+      }
+
+      // Store learning data
+      const learningEntry = {
+        fileName,
+        documentAnalysis,
+        contactsFound: result.contacts?.length || 0,
+        successRate: result.contacts?.length > 0 ? 1 : 0,
+        timestamp: Date.now()
+      };
+
+      this.processingStats.set(fileName, learningEntry);
+
+      logger.info('🧠 Learning from extraction', {
+        fileName,
+        contactsFound: result.contacts?.length || 0,
+        documentStructure: documentAnalysis.documentStructure
+      });
+    } catch (error) {
+      logger.warn('⚠️ Failed to learn from extraction', { error: error.message });
+    }
+  }
+
   getHealthStatus() {
     return {
       optimized: true,
