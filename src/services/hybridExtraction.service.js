@@ -63,8 +63,18 @@ class HybridExtractionService {
         processingTime: `${simpleTime}ms`
       });
 
-      // Step 2: Evaluate if we need AI enhancement
-      const needsAI = this.evaluateExtractionQuality(simpleResult, fileName, mimeType);
+      // Step 2: Evaluate if we need AI enhancement (prefer custom for tabular formats)
+      const isTabular = mimeType === 'text/csv' ||
+        mimeType === 'application/vnd.ms-excel' ||
+        mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+      // Optional env flags to control AI usage
+      const aiEnabledForXlsx = process.env.AI_ENABLED_FOR_XLSX !== 'false';
+      const disableAi = process.env.DISABLE_AI === 'true';
+
+      const needsAI = isTabular && !aiEnabledForXlsx
+        ? { needsAI: false, reason: 'Tabular document - custom parser preferred' }
+        : (disableAi ? { needsAI: false, reason: 'AI disabled by env' } : this.evaluateExtractionQuality(simpleResult, fileName, mimeType));
       
       if (!needsAI) {
         // Simple extraction was sufficient
@@ -95,7 +105,13 @@ class HybridExtractionService {
       });
 
       const aiStartTime = Date.now();
-      const aiResult = await this.aiService.extractContacts(fileBuffer, mimeType, fileName, options);
+      // Apply AI caps from env
+      const aiOptions = {
+        maxChunks: Number(process.env.AI_MAX_CHUNKS || 20),
+        chunkSize: Number(process.env.AI_CHUNK_SIZE || 4000),
+        earlyExitOnZero: process.env.AI_EARLY_EXIT_ON_ZERO_CONTACTS !== 'false'
+      };
+      const aiResult = await this.aiService.extractContacts(fileBuffer, mimeType, fileName, { ...options, aiOptions });
       const aiTime = Date.now() - aiStartTime;
 
       // Step 4: Hybrid result combination
