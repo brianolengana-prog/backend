@@ -32,6 +32,8 @@ const allowedOrigins = [
   env.FRONTEND_URL,
   'https://www.callsheetconverter.com',
   'https://callsheetconverter.com',
+  'https://www.callsheetconvert.com',
+  'https://callsheetconvert.com',
   'https://sjcallsheets-project.vercel.app',
   'https://sjcallsheets-project-*.vercel.app',
   'https://*.vercel.app',
