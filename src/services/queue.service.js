@@ -75,12 +75,24 @@ class QueueService {
       });
 
       console.log('✅ Job added to queue successfully:', job.id);
-      console.log('📊 Queue stats:', {
-        waiting: await queue.getWaiting(),
-        active: await queue.getActive(),
-        completed: await queue.getCompleted(),
-        failed: await queue.getFailed()
-      });
+      
+      // Get queue stats safely
+      try {
+        const [waiting, active, completed, failed] = await Promise.all([
+          queue.getWaiting(),
+          queue.getActive(), 
+          queue.getCompleted(),
+          queue.getFailed()
+        ]);
+        console.log('📊 Queue stats:', {
+          waiting: waiting.length,
+          active: active.length,
+          completed: completed.length,
+          failed: failed.length
+        });
+      } catch (error) {
+        console.warn('⚠️ Could not get queue stats:', error.message);
+      }
       logger.info('Extraction job added to queue', {
         jobId: job.id,
         userId: validatedData.userId,

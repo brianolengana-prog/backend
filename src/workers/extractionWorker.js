@@ -30,16 +30,34 @@ class ExtractionWorker {
 
     // Start main extraction queue worker
     const extractionQueue = queueManager.getQueue('extraction');
+    console.log('🔧 Setting up extraction worker for queue:', extractionQueue.name);
+    
     const extractionWorker = extractionQueue.process('extraction', 5, async (job) => {
       console.log('🔄 Processing extraction job:', job.id, job.data.fileName);
-      return await jobProcessor.processExtractionJob(job);
+      try {
+        const result = await jobProcessor.processExtractionJob(job);
+        console.log('✅ Job completed successfully:', job.id);
+        return result;
+      } catch (error) {
+        console.error('❌ Job failed:', job.id, error.message);
+        throw error;
+      }
     });
 
     // Start priority queue worker
     const priorityQueue = queueManager.getQueue('extraction-priority');
+    console.log('🔧 Setting up priority worker for queue:', priorityQueue.name);
+    
     const priorityWorker = priorityQueue.process('extraction', 10, async (job) => {
       console.log('🔄 Processing priority extraction job:', job.id, job.data.fileName);
-      return await jobProcessor.processExtractionJob(job);
+      try {
+        const result = await jobProcessor.processExtractionJob(job);
+        console.log('✅ Priority job completed successfully:', job.id);
+        return result;
+      } catch (error) {
+        console.error('❌ Priority job failed:', job.id, error.message);
+        throw error;
+      }
     });
 
     // Handle job events
