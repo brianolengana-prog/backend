@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const fs = require('fs').promises;
 const path = require('path');
 const winston = require('winston');
+const optimizedHybridExtractionService = require('./optimizedHybridExtraction.service');
 const hybridExtractionService = require('./hybridExtraction.service');
 const aiExtractionService = require('./aiExtraction.service');
 const optimizedAIExtractionService = require('./optimizedAIExtraction.service');
@@ -67,7 +68,8 @@ class JobProcessorService {
       let result;
       switch (extractionMethod) {
         case 'hybrid':
-          result = await hybridExtractionService.extractContacts(fileBuffer, `application/${fileType}`, fileName, options);
+          // Use optimized hybrid extraction for better performance
+          result = await optimizedHybridExtractionService.extractContacts(fileBuffer, `application/${fileType}`, fileName, options);
           break;
         case 'ai':
           result = await this.processWithAI(fileBuffer, fileType, fileName, options);
@@ -79,7 +81,8 @@ class JobProcessorService {
           result = await this.processWithAWSTextract(fileBuffer, fileType, fileName, options);
           break;
         default:
-          throw new Error(`Unknown extraction method: ${extractionMethod}`);
+          // Default to optimized hybrid for unknown methods
+          result = await optimizedHybridExtractionService.extractContacts(fileBuffer, `application/${fileType}`, fileName, options);
       }
 
       if (!result.success) {
