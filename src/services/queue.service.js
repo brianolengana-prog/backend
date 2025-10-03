@@ -75,6 +75,12 @@ class QueueService {
       });
 
       console.log('✅ Job added to queue successfully:', job.id);
+      console.log('🔍 Job details:', {
+        id: job.id,
+        name: job.name,
+        data: job.data,
+        opts: job.opts
+      });
       
       // Get queue stats safely
       try {
@@ -90,6 +96,11 @@ class QueueService {
           completed: completed.length,
           failed: failed.length
         });
+        
+        // Check if our job is in the waiting queue
+        const ourJob = waiting.find(j => j.id === job.id);
+        console.log('🔍 Our job in waiting queue:', !!ourJob);
+        
       } catch (error) {
         console.warn('⚠️ Could not get queue stats:', error.message);
       }
