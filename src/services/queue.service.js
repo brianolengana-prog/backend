@@ -63,16 +63,21 @@ class QueueService {
 
       const queue = queueManager.getQueue(queueName);
 
-      // Add job to queue
+      // Add job to queue with timeout
       console.log('🔄 Adding job to queue:', queueName);
-      const job = await queue.add(JobTypes.EXTRACTION, {
-        ...validatedData,
-        fileId,
-        filePath
-      }, {
-        priority: this.getPriorityValue(validatedData.priority),
-        delay: 0
-      });
+      const job = await Promise.race([
+        queue.add(JobTypes.EXTRACTION, {
+          ...validatedData,
+          fileId,
+          filePath
+        }, {
+          priority: this.getPriorityValue(validatedData.priority),
+          delay: 0
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Job addition timeout')), 10000)
+        )
+      ]);
 
       console.log('✅ Job added to queue successfully:', job.id);
       console.log('🔍 Job details:', {
@@ -82,25 +87,11 @@ class QueueService {
         opts: job.opts
       });
       
-      // Get queue stats safely
+      // Get basic queue stats safely
       try {
-        const [waiting, active, completed, failed] = await Promise.all([
-          queue.getWaiting(),
-          queue.getActive(), 
-          queue.getCompleted(),
-          queue.getFailed()
-        ]);
-        console.log('📊 Queue stats:', {
-          waiting: waiting.length,
-          active: active.length,
-          completed: completed.length,
-          failed: failed.length
-        });
-        
-        // Check if our job is in the waiting queue
-        const ourJob = waiting.find(j => j.id === job.id);
-        console.log('🔍 Our job in waiting queue:', !!ourJob);
-        
+        const waiting = await queue.getWaiting();
+        console.log('📊 Jobs waiting:', waiting.length);
+        console.log('🔍 Our job in waiting queue:', waiting.some(j => j.id === job.id));
       } catch (error) {
         console.warn('⚠️ Could not get queue stats:', error.message);
       }
@@ -112,6 +103,8 @@ class QueueService {
         queue: queueName
       });
 
+      console.log('🎉 Job queuing completed successfully');
+      
       return {
         success: true,
         jobId: job.id,
