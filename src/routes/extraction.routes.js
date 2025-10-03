@@ -121,20 +121,35 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     };
 
     const fileType = fileTypeMap[req.file.mimetype] || 'pdf';
-  // Always process synchronously for stability
+  // Always process synchronously for stability with timeout
   try {
     const hybridExtractionService = require('../services/hybridExtraction.service');
 
-    const result = await hybridExtractionService.extractContacts(
+    // Set a reasonable timeout for extraction (30 seconds)
+    const extractionPromise = hybridExtractionService.extractContacts(
       req.file.buffer,
       req.file.mimetype,
       req.file.originalname,
-      { userId, ...parsedOptions }
+      { 
+        userId, 
+        ...parsedOptions, 
+        maxContacts: 1000, // Limit contacts for performance
+        maxProcessingTime: 15000 // 15 second pattern processing limit
+      }
     );
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Extraction timeout - file too large or complex')), 30000);
+    });
+
+    console.log('🚀 Starting extraction with timeout protection...');
+    const result = await Promise.race([extractionPromise, timeoutPromise]);
 
     if (!result.success) {
       throw new Error(result.error || 'Extraction failed');
     }
+
+    console.log(`✅ Extraction completed: ${result.contacts?.length || 0} contacts found`);
 
     await usageService.incrementUsage(userId, 'upload', 1);
     if (result.contacts && result.contacts.length > 0) {
@@ -787,6 +802,30 @@ router.get('/queue/stats', async (_req, res) => {
     success: false,
     error: 'Queue statistics endpoint is deprecated. Queue has been removed.'
   });
+});
+
+/**
+ * GET /api/extraction/progress/:extractionId
+ * Get extraction progress (for debugging)
+ */
+router.get('/progress/:extractionId', async (req, res) => {
+  try {
+    const { extractionId } = req.params;
+    
+    // This is a simple implementation - in production you'd want to store progress in Redis or DB
+    res.json({
+      success: true,
+      extractionId,
+      status: 'processing',
+      message: 'Extraction in progress...',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get progress'
+    });
+  }
 });
 
 module.exports = router;

@@ -312,8 +312,8 @@ class ExtractionService {
       const workbook = xlsx.read(buffer, { type: 'buffer' });
       let fullText = '';
       const headerAliases = {
-        name: ['name', 'full name', 'contact name'],
-        role: ['role', 'position', 'title', 'job'],
+        name: ['name', 'full name', 'contact name', 'first name', 'last name'],
+        role: ['role', 'position', 'title', 'job', 'type of artist'],
         email: ['email', 'e-mail', 'mail'],
         phone: ['phone', 'mobile', 'cell', 'tel', 'telephone']
       };
@@ -326,19 +326,32 @@ class ExtractionService {
         return null;
       };
       
-      workbook.SheetNames.forEach(sheetName => {
+      // Process only first 3 sheets to avoid timeout on large files
+      const maxSheets = 3;
+      const sheetsToProcess = workbook.SheetNames.slice(0, maxSheets);
+      
+      for (const sheetName of sheetsToProcess) {
         const worksheet = workbook.Sheets[sheetName];
         // Prefer structured CSV-like text but ensure we include headers
         const json = xlsx.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-        if (!json || json.length === 0) return;
+        if (!json || json.length === 0) continue;
+        
         const headerRow = json[0].map(String);
         const mapped = headerRow.map(h => matchHeader(h) || normalizeHeader(h));
-        const rows = json.slice(1);
+        
+        // Process only first 1000 rows to avoid timeout
+        const maxRows = 1000;
+        const rows = json.slice(1, 1 + maxRows);
         const lines = rows.map(r => r.map(c => String(c)).join('\t')).join('\n');
+        
         if (lines.trim()) {
           fullText += `\n--- Sheet: ${sheetName} ---\n${headerRow.join('\t')}\n${lines}\n`;
         }
-      });
+      }
+      
+      if (workbook.SheetNames.length > maxSheets) {
+        fullText += `\n--- Note: ${workbook.SheetNames.length - maxSheets} additional sheets skipped for performance ---\n`;
+      }
       
       console.log('📊 XLSX processed successfully');
       return fullText.trim();

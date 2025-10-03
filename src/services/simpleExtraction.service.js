@@ -221,30 +221,94 @@ class SimpleExtractionService {
   }
 
   /**
-   * Extract contacts from text using patterns
+   * Extract contacts from text using patterns with early exit optimization
    */
   async extractContactsFromText(text, options = {}) {
     const contacts = [];
     const rolePreferences = options.rolePreferences || [];
+    const maxContacts = options.maxContacts || 1000; // Early exit limit
+    const maxProcessingTime = options.maxProcessingTime || 15000; // 15 second timeout
+    const startTime = Date.now();
 
     logger.info('🔍 Extracting contacts from text', {
       textLength: text.length,
-      rolePreferences: rolePreferences.length
+      rolePreferences: rolePreferences.length,
+      maxContacts,
+      maxProcessingTime
     });
 
-    // Try each pattern
-    for (const pattern of this.contactPatterns) {
+    // Try each pattern with early exit and detailed logging
+    for (let i = 0; i < this.contactPatterns.length; i++) {
+      const pattern = this.contactPatterns[i];
+      const patternStartTime = Date.now();
+      
+      // Check for timeout before processing each pattern
+      if (Date.now() - startTime > maxProcessingTime) {
+        logger.warn('⏰ Pattern extraction timeout reached', {
+          processedPatterns: i,
+          totalPatterns: this.contactPatterns.length,
+          contactsFound: contacts.length,
+          processingTime: `${Date.now() - startTime}ms`
+        });
+        break;
+      }
+      
       try {
-        const matches = [...text.matchAll(pattern.regex)];
+        logger.info(`🔍 Testing pattern ${i + 1}/${this.contactPatterns.length}: ${pattern.name}`);
         
-        for (const match of matches) {
+        const matches = [...text.matchAll(pattern.regex)];
+        logger.info(`📊 Pattern ${pattern.name} found ${matches.length} matches`);
+        
+        // Limit matches per pattern to prevent hanging
+        const maxMatchesPerPattern = 500;
+        const limitedMatches = matches.slice(0, maxMatchesPerPattern);
+        
+        if (matches.length > maxMatchesPerPattern) {
+          logger.info(`⚠️ Limiting pattern ${pattern.name} to ${maxMatchesPerPattern} matches (found ${matches.length})`);
+        }
+        
+        for (let j = 0; j < limitedMatches.length; j++) {
+          const match = limitedMatches[j];
           const contact = this.buildContactFromMatch(match, pattern, rolePreferences);
+          
           if (contact && this.isValidContact(contact)) {
             contacts.push(contact);
+            
+            // Log every 50 contacts found
+            if (contacts.length % 50 === 0) {
+              logger.info(`📈 Found ${contacts.length} contacts so far`, {
+                pattern: pattern.name,
+                processingTime: `${Date.now() - startTime}ms`
+              });
+            }
+            
+            // Early exit if we have enough contacts
+            if (contacts.length >= maxContacts) {
+              logger.info('⚡ Early exit: reached max contacts', { 
+                found: contacts.length, 
+                maxContacts,
+                processingTime: `${Date.now() - startTime}ms`
+              });
+              break;
+            }
           }
         }
+        
+        const patternTime = Date.now() - patternStartTime;
+        logger.info(`✅ Pattern ${pattern.name} completed in ${patternTime}ms`, {
+          matches: limitedMatches.length,
+          validContacts: contacts.length
+        });
+        
+        // Break outer loop if we hit the limit
+        if (contacts.length >= maxContacts) break;
+        
       } catch (error) {
-        logger.warn('⚠️ Pattern failed', { pattern: pattern.name, error: error.message });
+        logger.warn('⚠️ Pattern failed', { 
+          pattern: pattern.name, 
+          error: error.message,
+          processingTime: `${Date.now() - patternStartTime}ms`
+        });
       }
     }
 
@@ -253,7 +317,8 @@ class SimpleExtractionService {
 
     logger.info('📊 Pattern extraction results', {
       totalMatches: contacts.length,
-      uniqueContacts: uniqueContacts.length
+      uniqueContacts: uniqueContacts.length,
+      processingTime: `${Date.now() - startTime}ms`
     });
 
     return uniqueContacts;
