@@ -104,6 +104,24 @@ class SimpleExtractionService {
         name: 'role_name_contact_enhanced',
         regex: /([A-Z][A-Z\s]+):\s*([A-Za-z\s]+)\s*(?:\/|\s)([+\d\s\-\(\)]+)(?:\s*([^\n@]+@[^\n]+))?/gm,
         groups: ['role', 'name', 'phone', 'email']
+      },
+      // Pattern 16: Call sheet format with names and phones on separate lines
+      {
+        name: 'call_sheet_name_phone_lines',
+        regex: /([A-Za-z\s]{2,})\s*\n\s*([+\d\s\-\(\)]{10,})/gm,
+        groups: ['name', 'phone']
+      },
+      // Pattern 17: Structured call sheet with roles and names
+      {
+        name: 'call_sheet_structured',
+        regex: /([A-Z][A-Z\s]+):\s*([A-Za-z\s]+)(?:\s*([+\d\s\-\(\)]{10,}))?/gm,
+        groups: ['role', 'name', 'phone']
+      },
+      // Pattern 18: Name followed by phone on same line
+      {
+        name: 'name_phone_same_line',
+        regex: /([A-Za-z\s]{2,})\s+([+\d\s\-\(\)]{10,})/gm,
+        groups: ['name', 'phone']
       }
     ];
 
@@ -305,7 +323,7 @@ class SimpleExtractionService {
         
         for (let j = 0; j < limitedMatches.length; j++) {
           const match = limitedMatches[j];
-          const contact = this.buildContactFromMatch(match, pattern, rolePreferences);
+          const contact = this.buildContactFromMatch(match, pattern, rolePreferences, text);
           
           if (contact && this.isValidContact(contact)) {
             contacts.push(contact);
@@ -363,7 +381,7 @@ class SimpleExtractionService {
   /**
    * Build contact object from regex match
    */
-  buildContactFromMatch(match, pattern, rolePreferences = []) {
+  buildContactFromMatch(match, pattern, rolePreferences = [], text = '') {
     const contact = {
       name: '',
       role: '',
@@ -402,6 +420,20 @@ class SimpleExtractionService {
     // For phone-only contacts, try to infer role from context or use default
     if (!contact.role && contact.phone && !contact.name) {
       contact.role = 'Contact'; // Default role for phone-only contacts
+    }
+    
+    // Try to find a name near the phone number if we don't have one
+    if (!contact.name && contact.phone && pattern.name === 'phone_pattern') {
+      // This is a phone-only match, try to find a nearby name
+      const phoneIndex = match.index;
+      const textBefore = text.substring(Math.max(0, phoneIndex - 100), phoneIndex);
+      const textAfter = text.substring(phoneIndex + match[0].length, Math.min(text.length, phoneIndex + match[0].length + 100));
+      
+      // Look for names in the surrounding text
+      const nameMatch = textBefore.match(/([A-Za-z\s]{2,})\s*$/m) || textAfter.match(/^([A-Za-z\s]{2,})\s/m);
+      if (nameMatch) {
+        contact.name = nameMatch[1].trim();
+      }
     }
 
     return contact;
