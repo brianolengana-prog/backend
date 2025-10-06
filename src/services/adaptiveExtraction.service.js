@@ -318,7 +318,7 @@ Return JSON array with: name, role, phone, email, company, section`
       try {
         const aiPrompt = this.getAIPrompt(strategy, text, simpleContacts);
         // Use the correct method name from AI service
-        const aiResult = await this.aiService.extractContacts(null, 'text/plain', 'extracted_text.txt', {
+        const aiResult = await this.aiService.extractContacts(fileBuffer, mimeType, fileName, {
           ...options,
           prompt: aiPrompt,
           mode: strategy.aiMode,
