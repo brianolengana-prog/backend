@@ -187,27 +187,38 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             { userId, ...parsedOptions }
           );
           
-          if (legacyResult && legacyResult.success && legacyResult.contacts) {
-            console.log('✅ Legacy extraction successful, returning result directly');
-            
-            // Record usage and return result directly
-            await usageService.incrementUsage(userId, 'upload', 1);
-            
-            return res.json({
-              success: true,
-              jobId: `legacy_${Date.now()}`,
-              status: 'completed',
-              result: {
-                contacts: legacyResult.contacts,
-                metadata: legacyResult.metadata || {}
-              },
-              contacts: legacyResult.contacts,
-              usage: await usageService.getUsageInfo(userId),
-              documentType: 'call-sheet',
-              productionType: 'extraction',
-              processedChunks: 1
+        if (legacyResult && legacyResult.success && legacyResult.contacts) {
+          console.log('✅ Legacy extraction successful, persisting to DB');
+          
+          let jobId = null;
+          try {
+            await ensureProfileForUser(userId);
+            const job = await prisma.job.create({
+              data: {
+                userId,
+                title: `Legacy Extraction - ${req.file.originalname}`,
+                fileName: req.file.originalname,
+                status: 'COMPLETED'
+              }
             });
+            jobId = job.id;
+            await extractionService.saveContacts(legacyResult.contacts, userId, jobId);
+          } catch (persistErr) {
+            console.error('❌ Failed to persist legacy contacts:', persistErr);
           }
+
+          await usageService.incrementUsage(userId, 'upload', 1);
+          
+          return res.json({
+            success: true,
+            jobId,
+            status: 'completed',
+            result: {
+              contacts: legacyResult.contacts,
+              metadata: legacyResult.metadata || {}
+            }
+          });
+        }
         } catch (legacyError) {
           console.error('❌ Legacy extraction also failed:', legacyError.message);
         }

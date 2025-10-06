@@ -1081,16 +1081,40 @@ class ExtractionService {
    */
   async saveContacts(contacts, userId, jobId) {
     try {
+      const normalizeEmail = (e) => {
+        if (!e) return null;
+        // Strip tabs/newlines and split on whitespace/commas; pick first plausible email
+        const flat = String(e).replace(/[\t\n\r]+/g, ' ').trim();
+        const candidates = flat.split(/[\s,;]+/).filter(Boolean);
+        const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+        const firstValid = candidates.find(c => emailRegex.test(c));
+        return firstValid || null;
+      };
+
+      const normalizePhone = (p) => {
+        if (!p) return null;
+        const digits = String(p).replace(/[^0-9]/g, '');
+        if (digits.length < 10) return null;
+        const last10 = digits.slice(-10);
+        return `(${last10.slice(0,3)}) ${last10.slice(3,6)}-${last10.slice(6)}`;
+      };
+
+      const normalizeName = (n) => {
+        if (!n) return 'Unknown';
+        const cleaned = String(n).trim();
+        return cleaned.length > 0 ? cleaned : 'Unknown';
+      };
+
       const contactsToSave = contacts.map(contact => ({
-        name: contact.name || 'Unknown',
-        email: contact.email || null,
-        phone: contact.phone || null,
+        name: normalizeName(contact.name),
+        email: normalizeEmail(contact.email),
+        phone: normalizePhone(contact.phone),
         role: contact.role || null,
         company: contact.company || null,
         isSelected: true,
         jobId: jobId,
         userId: userId
-      }));
+      })).filter(c => c.name || c.email || c.phone);
 
       await this.prisma.contact.createMany({
         data: contactsToSave,
