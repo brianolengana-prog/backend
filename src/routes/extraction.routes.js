@@ -255,9 +255,28 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       await usageService.incrementUsage(userId, 'contact_extraction', result.contacts.length);
     }
 
+    // Persist contacts to DB if any were extracted
+    let jobId = null;
+    if (result.contacts && result.contacts.length > 0) {
+      try {
+        const job = await prisma.job.create({
+          data: {
+            userId,
+            title: `Extraction - ${req.file.originalname}`,
+            fileName: req.file.originalname,
+            status: 'COMPLETED'
+          }
+        });
+        jobId = job.id;
+        await extractionService.saveContacts(result.contacts, userId, jobId);
+      } catch (dbError) {
+        console.error('❌ Failed to persist contacts:', dbError);
+      }
+    }
+
     return res.json({
       success: true,
-      jobId: `sync_${Date.now()}`,
+      jobId: jobId,
       status: 'completed',
       result: {
         contacts: result.contacts || [],
