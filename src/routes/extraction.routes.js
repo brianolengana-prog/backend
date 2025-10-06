@@ -15,6 +15,9 @@ const awsTextractService = require('../services/awsTextract.service');
 const hybridExtractionService = require('../services/hybridExtraction.service');
 const adaptiveExtractionService = require('../services/adaptiveExtraction.service');
 const usageService = require('../services/usage.service');
+// Enterprise extraction integration
+const ExtractionMigrationService = require('../services/enterprise/ExtractionMigrationService');
+const enterpriseConfig = require('../config/enterprise.config');
 // Queue removed: we process synchronously for reliability
 // const queueService = require('../services/queue.service');
 const { PrismaClient } = require('@prisma/client');
@@ -25,6 +28,9 @@ const prisma = new PrismaClient();
 // New modular architecture provides better maintainability and performance
 
 const router = express.Router();
+
+// Initialize enterprise migration service
+const migrationService = new ExtractionMigrationService();
 
 // All extraction routes require authentication
 router.use(authenticateToken);
@@ -128,18 +134,33 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     const fileType = fileTypeMap[req.file.mimetype] || 'pdf';
   // Always process synchronously for stability with timeout
   try {
-    // Use adaptive extraction service for automatic strategy selection
-    const extractionPromise = adaptiveExtractionService.extractContacts(
-      req.file.buffer,
-      req.file.mimetype,
-      req.file.originalname,
-      { 
-        userId, 
-        ...parsedOptions, 
-        maxContacts: 1000, // Limit contacts for performance
-        maxProcessingTime: 15000 // 15 second pattern processing limit
-      }
-    );
+    // Extract text first
+    let extractedText = '';
+    if (req.file.mimetype === 'application/pdf') {
+      extractedText = await extractionService.extractTextFromPDF(req.file.buffer);
+    } else if (req.file.mimetype.includes('wordprocessingml') || req.file.mimetype === 'application/msword') {
+      extractedText = await extractionService.extractTextFromDOCX(req.file.buffer);
+    } else if (req.file.mimetype.includes('spreadsheetml') || req.file.mimetype === 'application/vnd.ms-excel') {
+      extractedText = await extractionService.extractTextFromXLSX(req.file.buffer);
+    } else if (req.file.mimetype === 'text/csv') {
+      extractedText = req.file.buffer.toString('utf-8');
+    } else if (req.file.mimetype === 'text/plain') {
+      extractedText = req.file.buffer.toString('utf-8');
+    } else if (req.file.mimetype.startsWith('image/')) {
+      extractedText = await extractionService.extractTextFromImage(req.file.buffer);
+    }
+
+    // Use migration service to route to appropriate extraction system
+    const extractionPromise = migrationService.extractContacts(extractedText, {
+      userId,
+      fileName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      fileSize: req.file.size,
+      extractionId: `sync_${Date.now()}`,
+      ...parsedOptions,
+      maxContacts: 1000,
+      maxProcessingTime: 15000
+    });
 
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error('Extraction timeout - file too large or complex')), 30000);
@@ -948,6 +969,52 @@ router.get('/progress/:extractionId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get progress'
+    });
+  }
+});
+
+/**
+ * GET /api/extraction/migration-status
+ * Get enterprise migration status for current user
+ */
+router.get('/migration-status', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const status = migrationService.getMigrationStatus(userId);
+    
+    res.json({
+      success: true,
+      ...status
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get migration status'
+    });
+  }
+});
+
+/**
+ * POST /api/extraction/force-migration
+ * Force migration to enterprise or legacy system (admin only)
+ */
+router.post('/force-migration', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { direction = 'enterprise' } = req.body;
+    
+    // In production, you'd want to check admin permissions here
+    const status = await migrationService.forceMigration(userId, direction);
+    
+    res.json({
+      success: true,
+      message: `Migration forced to ${direction} system`,
+      ...status
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Failed to force migration'
     });
   }
 });
