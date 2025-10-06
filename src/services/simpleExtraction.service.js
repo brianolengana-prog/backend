@@ -68,6 +68,42 @@ class SimpleExtractionService {
         name: 'pipe_name_company_role_email_phone',
         regex: /^([^|]+)\|([^|]+)\|([^|]+)\|([^|\s]+@[^|\s]+)\|(.+)$/gm,
         groups: ['name', 'company', 'role', 'email', 'phone']
+      },
+      // Pattern 10: Call sheet crew format - Role: Name / Phone
+      {
+        name: 'call_sheet_crew',
+        regex: /([A-Z][A-Z\s]+):\s*([A-Za-z\s]+)\s*\/\s*([+\d\s\-\(\)]+)/gm,
+        groups: ['role', 'name', 'phone']
+      },
+      // Pattern 11: Call sheet crew multiline
+      {
+        name: 'call_sheet_crew_multiline',
+        regex: /([A-Z][A-Z\s]+):\s*([A-Za-z\s]+)\s*\n\s*([+\d\s\-\(\)]+)/gm,
+        groups: ['role', 'name', 'phone']
+      },
+      // Pattern 12: Model with agency
+      {
+        name: 'call_sheet_model',
+        regex: /Model:\s*([A-Za-z\s]+)\s*\/\s*([A-Za-z\s]+)\s*-\s*([A-Za-z\s]+)\s*\/\s*([+\d\s\-\(\)]+)/gm,
+        groups: ['name', 'agency', 'agent', 'phone']
+      },
+      // Pattern 13: Enhanced call sheet format with multiple lines
+      {
+        name: 'call_sheet_enhanced',
+        regex: /([A-Z][A-Z\s]+):\s*([A-Za-z\s]+)\s*\/\s*([+\d\s\-\(\)]+)\s*(?:\n\s*([^\n@]+@[^\n]+))?/gm,
+        groups: ['role', 'name', 'phone', 'email']
+      },
+      // Pattern 14: Name and phone on separate lines
+      {
+        name: 'name_phone_separate',
+        regex: /([A-Za-z\s]{2,})\s*\n\s*([+\d\s\-\(\)]{10,})/gm,
+        groups: ['name', 'phone']
+      },
+      // Pattern 15: Role with name and contact info
+      {
+        name: 'role_name_contact_enhanced',
+        regex: /([A-Z][A-Z\s]+):\s*([A-Za-z\s]+)\s*(?:\/|\s)([+\d\s\-\(\)]+)(?:\s*([^\n@]+@[^\n]+))?/gm,
+        groups: ['role', 'name', 'phone', 'email']
       }
     ];
 
@@ -362,6 +398,11 @@ class SimpleExtractionService {
     if (!contact.role && contact.name) {
       contact.role = this.inferRoleFromContext(contact.name, rolePreferences);
     }
+    
+    // For phone-only contacts, try to infer role from context or use default
+    if (!contact.role && contact.phone && !contact.name) {
+      contact.role = 'Contact'; // Default role for phone-only contacts
+    }
 
     return contact;
   }
@@ -385,8 +426,22 @@ class SimpleExtractionService {
    * Validate contact has required fields
    */
   isValidContact(contact) {
-    return contact.name && contact.name.length > 1 && 
-           (contact.email || contact.phone);
+    // Must have at least a name or phone number
+    const hasName = contact.name && contact.name.length > 1;
+    const hasPhone = contact.phone && contact.phone.length > 7; // At least 8 digits
+    const hasEmail = contact.email && contact.email.includes('@');
+    
+    // Valid if we have name + (phone OR email)
+    if (hasName && (hasPhone || hasEmail)) {
+      return true;
+    }
+    
+    // Also valid if we have phone number (even without name, for call sheets)
+    if (hasPhone && contact.phone.replace(/\D/g, '').length >= 10) {
+      return true;
+    }
+    
+    return false;
   }
 
   /**

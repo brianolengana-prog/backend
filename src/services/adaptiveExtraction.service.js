@@ -121,8 +121,18 @@ Return JSON array with: name, role, phone, email, company, section`
         type: documentAnalysis.type,
         confidence: documentAnalysis.confidence,
         complexity: documentAnalysis.complexity,
-        estimatedContacts: documentAnalysis.estimatedContacts
+        estimatedContacts: documentAnalysis.estimatedContacts,
+        textLength: text.length
       });
+
+      // If very little text was extracted, this might be a scanned PDF or image
+      if (text.length < 100) {
+        logger.warn('⚠️ Very little text extracted from PDF', {
+          extractionId,
+          textLength: text.length,
+          textPreview: text.substring(0, 50)
+        });
+      }
 
       // Step 3: Select extraction strategy based on analysis
       const strategy = this.selectStrategy(documentAnalysis, options);
@@ -307,12 +317,14 @@ Return JSON array with: name, role, phone, email, company, section`
     if (strategy.useAI) {
       try {
         const aiPrompt = this.getAIPrompt(strategy, text, simpleContacts);
-        const aiResult = await this.aiService.extractContactsFromText(text, {
+        // Use the correct method name from AI service
+        const aiResult = await this.aiService.extractContacts(null, 'text/plain', 'extracted_text.txt', {
           ...options,
           prompt: aiPrompt,
-          mode: strategy.aiMode
+          mode: strategy.aiMode,
+          extractedText: text
         });
-        aiContacts = aiResult || [];
+        aiContacts = aiResult?.contacts || [];
         
         logger.info('🤖 AI extraction results', {
           extractionId,

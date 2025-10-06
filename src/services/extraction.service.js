@@ -45,7 +45,9 @@ class ExtractionService {
       { name: 'pdfjs', module: 'pdfjs-dist', required: true },
       { name: 'mammoth', module: 'mammoth', required: true },
       { name: 'xlsx', module: 'xlsx', required: true },
-      { name: 'tesseract', module: 'tesseract.js', required: false }
+      { name: 'tesseract', module: 'tesseract.js', required: false },
+      { name: 'pdf2pic', module: 'pdf2pic', required: false },
+      { name: 'sharp', module: 'sharp', required: false }
     ];
 
     const loadPromises = libraryConfigs.map(async ({ name, module, required }) => {
@@ -103,7 +105,9 @@ class ExtractionService {
         pdfjs: 'pdfjs-dist',
         mammoth: 'mammoth',
         xlsx: 'xlsx',
-        tesseract: 'tesseract.js'
+        tesseract: 'tesseract.js',
+        pdf2pic: 'pdf2pic',
+        sharp: 'sharp'
       };
 
       const moduleName = libraryConfigs[libraryName];
@@ -260,7 +264,7 @@ class ExtractionService {
   }
 
   /**
-   * Extract text from PDF documents
+   * Extract text from PDF documents with OCR fallback for scanned PDFs
    */
   async extractTextFromPDF(buffer) {
     const pdfjs = await this.ensureLibrary('pdfjs', true);
@@ -297,6 +301,31 @@ class ExtractionService {
       }
       
       console.log('📄 PDF processed successfully');
+      console.log('📄 Extracted text length:', fullText.length);
+      console.log('📄 Extracted text preview:', fullText.substring(0, 200));
+      
+      // Check if this might be a scanned PDF (very little text extracted)
+      const textLength = fullText.trim().length;
+      const isLikelyScanned = textLength < 100 || this.isLikelyScannedPDF(fullText);
+      
+      if (isLikelyScanned) {
+        console.log('⚠️ PDF appears to be scanned or image-based');
+        console.log(`📊 Text density analysis: ${textLength} characters extracted`);
+        console.log('🔄 Attempting OCR fallback for scanned PDF...');
+        
+        try {
+          const ocrText = await this.extractTextFromScannedPDF(buffer);
+          if (ocrText && ocrText.trim().length > textLength) {
+            console.log('✅ OCR extraction successful - using OCR results');
+            console.log(`📊 OCR improvement: ${textLength} → ${ocrText.trim().length} characters`);
+            return ocrText;
+          }
+        } catch (ocrError) {
+          console.warn('⚠️ OCR fallback failed:', ocrError.message);
+          console.log('💡 Consider using a different PDF or manually extracting text');
+        }
+      }
+      
       return fullText.trim();
     } catch (error) {
       console.error('❌ PDF processing error:', error.message);
@@ -328,6 +357,8 @@ class ExtractionService {
           }
           
           console.log('📄 PDF processed successfully with fallback method');
+          console.log('📄 Fallback extracted text length:', fullText.length);
+          console.log('📄 Fallback extracted text preview:', fullText.substring(0, 200));
           return fullText.trim();
         } catch (fallbackError) {
           console.error('❌ PDF fallback processing also failed:', fallbackError.message);
@@ -451,6 +482,81 @@ class ExtractionService {
   }
 
   /**
+   * Detect if a PDF is likely scanned based on text characteristics
+   */
+  isLikelyScannedPDF(text) {
+    if (!text || text.trim().length === 0) return true;
+    
+    // Check for common scanned PDF characteristics
+    const lines = text.split('\n').filter(line => line.trim().length > 0);
+    const avgLineLength = lines.reduce((sum, line) => sum + line.length, 0) / lines.length;
+    
+    // Scanned PDFs often have:
+    // - Very short lines (OCR artifacts)
+    // - Lots of single characters or short words
+    // - High ratio of non-alphanumeric characters
+    const shortLines = lines.filter(line => line.length < 10).length;
+    const shortLineRatio = shortLines / lines.length;
+    
+    const nonAlphaRatio = (text.replace(/[a-zA-Z0-9\s]/g, '').length) / text.length;
+    
+    // Heuristics for scanned PDF detection
+    const isScanned = (
+      avgLineLength < 20 ||           // Very short average line length
+      shortLineRatio > 0.5 ||         // More than 50% short lines
+      nonAlphaRatio > 0.3 ||          // High ratio of special characters
+      text.length < 200               // Very little text overall
+    );
+    
+    console.log('🔍 Scanned PDF analysis:', {
+      avgLineLength: avgLineLength.toFixed(2),
+      shortLineRatio: (shortLineRatio * 100).toFixed(1) + '%',
+      nonAlphaRatio: (nonAlphaRatio * 100).toFixed(1) + '%',
+      textLength: text.length,
+      isLikelyScanned: isScanned
+    });
+    
+    return isScanned;
+  }
+
+  /**
+   * Extract text from scanned PDFs using OCR
+   * This is a simplified version that works without pdf2pic
+   */
+  async extractTextFromScannedPDF(buffer) {
+    const tesseract = await this.ensureLibrary('tesseract', false);
+    
+    if (!tesseract) {
+      throw new Error('OCR processing not available - tesseract.js library not loaded');
+    }
+    
+    try {
+      console.log('🔄 Attempting OCR on PDF buffer directly...');
+      
+      // Try to process the PDF buffer directly with Tesseract
+      // This works for some PDFs but not all
+      const { data: { text } } = await tesseract.recognize(buffer, 'eng', {
+        logger: m => console.log(`OCR Progress: ${m}`)
+      });
+      
+      if (text && text.trim()) {
+        console.log('📄 Scanned PDF OCR processed successfully');
+        console.log('📄 OCR extracted text length:', text.length);
+        console.log('📄 OCR extracted text preview:', text.substring(0, 200));
+        return text.trim();
+      } else {
+        console.log('⚠️ OCR found no text in PDF');
+        throw new Error('No text found in scanned PDF');
+      }
+    } catch (error) {
+      console.error('❌ Scanned PDF OCR processing failed:', error.message);
+      
+      // If direct OCR fails, provide helpful error message
+      throw new Error(`Scanned PDF OCR processing failed: ${error.message}. This PDF may require manual text extraction or a different OCR approach.`);
+    }
+  }
+
+  /**
    * Extract text from images using OCR
    */
   async extractTextFromImage(buffer) {
@@ -461,7 +567,9 @@ class ExtractionService {
     }
     
     try {
-      const { data: { text } } = await tesseract.recognize(buffer);
+      const { data: { text } } = await tesseract.recognize(buffer, 'eng', {
+        logger: m => console.log(`OCR Progress: ${m}`)
+      });
       console.log('📄 Image OCR processed successfully');
       return text.trim();
     } catch (error) {
@@ -994,7 +1102,9 @@ class ExtractionService {
         pdfjs: this.libraries.has('pdfjs'),
         mammoth: this.libraries.has('mammoth'),
         xlsx: this.libraries.has('xlsx'),
-        tesseract: this.libraries.has('tesseract')
+        tesseract: this.libraries.has('tesseract'),
+        pdf2pic: this.libraries.has('pdf2pic'),
+        sharp: this.libraries.has('sharp')
       }
     };
   }
