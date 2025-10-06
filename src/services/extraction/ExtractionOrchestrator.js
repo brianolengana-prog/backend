@@ -70,7 +70,7 @@ class ExtractionOrchestrator {
           extractionMethod: 'pattern-based',
           processingTime,
           textLength: extractedText.length,
-          confidence: ContactValidator.calculateOverallConfidence(finalContacts),
+          quality: ContactValidator.calculateOverallQuality(finalContacts),
           validationStats,
           documentAnalysis: DocumentAnalyzer.getAnalysisSummary(documentAnalysis)
         }
@@ -136,9 +136,6 @@ class ExtractionOrchestrator {
         email: contact.email || '',
         phone: contact.phone || '',
         company: contact.company || '',
-        section: contact.section || 'OTHER',
-        confidence: contact.confidence || 0.5,
-        source: contact.source || 'extraction',
         userId,
         jobId
       }));

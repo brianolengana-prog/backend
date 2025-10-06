@@ -44,8 +44,7 @@ class ContactValidator {
 
     return contacts
       .map(contact => this.normalizeContact(contact))
-      .filter(contact => this.isValidContact(contact))
-      .map(contact => this.calculateConfidenceScore(contact));
+      .filter(contact => this.isValidContact(contact));
   }
 
   /**
@@ -61,12 +60,7 @@ class ContactValidator {
       role: this.cleanRole(contact.role),
       email: this.cleanEmail(contact.email),
       phone: this.cleanPhone(contact.phone),
-      company: this.cleanCompany(contact.company),
-      section: contact.section || this.inferSection(contact.role),
-      source: contact.source || 'unknown',
-      confidence: contact.confidence || 0.5,
-      lineNumber: contact.lineNumber || 0,
-      rawMatch: contact.rawMatch || ''
+      company: this.cleanCompany(contact.company)
     };
   }
 
@@ -199,23 +193,6 @@ class ContactValidator {
       .trim();
   }
 
-  /**
-   * Infer section based on role
-   */
-  inferSection(role) {
-    if (!role || typeof role !== 'string') return 'OTHER';
-    
-    const roleUpper = role.toUpperCase();
-    
-    if (roleUpper.includes('PHOTOGRAPHER') || roleUpper.includes('CAMERA')) return 'CREW';
-    if (roleUpper.includes('MODEL') || roleUpper.includes('TALENT')) return 'TALENT';
-    if (roleUpper.includes('PRODUCER') || roleUpper.includes('DIRECTOR')) return 'PRODUCTION';
-    if (roleUpper.includes('STYLIST') || roleUpper.includes('MUA')) return 'CREW';
-    if (roleUpper.includes('CLIENT') || roleUpper.includes('AGENCY')) return 'CLIENT';
-    if (roleUpper.includes('HAIR') || roleUpper.includes('MAKEUP')) return 'CREW';
-    
-    return 'CREW';
-  }
 
   /**
    * Validate that contact has required information
@@ -303,40 +280,38 @@ class ContactValidator {
   }
 
   /**
-   * Calculate confidence score for contact
+   * Calculate quality score for contact (for internal use only)
    */
-  calculateConfidenceScore(contact) {
-    let confidence = contact.confidence || 0.5;
+  calculateQualityScore(contact) {
+    let score = 0.5;
     
-    // Boost confidence based on completeness
-    if (contact.name && contact.name.length > 2) confidence += 0.2;
-    if (contact.role && contact.role !== 'Contact') confidence += 0.1;
-    if (contact.phone && contact.phone.length > 0) confidence += 0.1;
-    if (contact.email && contact.email.length > 0) confidence += 0.1;
-    if (contact.company && contact.company.length > 0) confidence += 0.05;
+    // Boost score based on completeness
+    if (contact.name && contact.name.length > 2) score += 0.2;
+    if (contact.role && contact.role !== 'Contact') score += 0.1;
+    if (contact.phone && contact.phone.length > 0) score += 0.1;
+    if (contact.email && contact.email.length > 0) score += 0.1;
+    if (contact.company && contact.company.length > 0) score += 0.05;
     
-    // Boost confidence for recognized roles
+    // Boost score for recognized roles
     if (contact.role && this.roleKeywords.some(keyword => 
       contact.role.toUpperCase().includes(keyword))) {
-      confidence += 0.1;
+      score += 0.1;
     }
     
-    // Reduce confidence for potential issues
-    if (contact.name && contact.name.length < 4) confidence -= 0.1;
-    if (!contact.phone && !contact.email) confidence -= 0.2;
+    // Reduce score for potential issues
+    if (contact.name && contact.name.length < 4) score -= 0.1;
+    if (!contact.phone && !contact.email) score -= 0.2;
     
-    // Ensure confidence is between 0 and 1
-    contact.confidence = Math.max(0, Math.min(1, confidence));
-    
-    return contact;
+    // Ensure score is between 0 and 1
+    return Math.max(0, Math.min(1, score));
   }
 
   /**
-   * Sort contacts by importance and confidence
+   * Sort contacts by importance (role priority)
    */
   sortContacts(contacts) {
     return contacts.sort((a, b) => {
-      // First sort by role priority
+      // Sort by role priority
       const aPriority = this.rolePriority[a.role] || 99;
       const bPriority = this.rolePriority[b.role] || 99;
       
@@ -344,8 +319,8 @@ class ContactValidator {
         return aPriority - bPriority;
       }
       
-      // Then by confidence
-      return (b.confidence || 0) - (a.confidence || 0);
+      // Then by name alphabetically
+      return (a.name || '').localeCompare(b.name || '');
     });
   }
 
@@ -368,15 +343,15 @@ class ContactValidator {
   }
 
   /**
-   * Calculate overall confidence for a set of contacts
+   * Calculate overall quality for a set of contacts (for internal metrics)
    */
-  calculateOverallConfidence(contacts) {
+  calculateOverallQuality(contacts) {
     if (!contacts || contacts.length === 0) return 0;
     
-    const totalConfidence = contacts.reduce((sum, contact) => 
-      sum + (contact.confidence || 0), 0);
+    const totalQuality = contacts.reduce((sum, contact) => 
+      sum + this.calculateQualityScore(contact), 0);
     
-    return totalConfidence / contacts.length;
+    return totalQuality / contacts.length;
   }
 
   /**
@@ -387,8 +362,6 @@ class ContactValidator {
       originalCount: originalContacts.length,
       validatedCount: validatedContacts.length,
       rejectedCount: originalContacts.length - validatedContacts.length,
-      averageConfidence: this.calculateOverallConfidence(validatedContacts),
-      sectionsFound: [...new Set(validatedContacts.map(c => c.section))],
       rolesFound: [...new Set(validatedContacts.map(c => c.role))]
     };
   }
