@@ -273,8 +273,16 @@ class ExtractionService {
       } else if (buffer instanceof Buffer) {
         uint8Array = new Uint8Array(buffer);
       } else {
+        // Convert any other buffer-like object to Uint8Array
         uint8Array = new Uint8Array(buffer);
       }
+      
+      console.log('🔧 PDF Buffer conversion:', {
+        originalType: buffer.constructor.name,
+        convertedType: uint8Array.constructor.name,
+        bufferLength: buffer.length,
+        uint8ArrayLength: uint8Array.length
+      });
       
       const pdf = await pdfjs.getDocument({ data: uint8Array }).promise;
       let fullText = '';
@@ -292,6 +300,41 @@ class ExtractionService {
       return fullText.trim();
     } catch (error) {
       console.error('❌ PDF processing error:', error.message);
+      
+      // If it's a Buffer/Uint8Array issue, try a different approach
+      if (error.message.includes('Uint8Array') || error.message.includes('Buffer')) {
+        try {
+          console.log('🔄 Retrying PDF processing with alternative Buffer conversion...');
+          
+          // Try converting Buffer to ArrayBuffer first, then to Uint8Array
+          let uint8Array;
+          if (buffer instanceof Buffer) {
+            const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+            uint8Array = new Uint8Array(arrayBuffer);
+          } else {
+            uint8Array = new Uint8Array(buffer);
+          }
+          
+          const pdf = await pdfjs.getDocument({ data: uint8Array }).promise;
+          let fullText = '';
+          
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items
+              .map(item => item.str)
+              .join(' ');
+            fullText += `\n--- Page ${i} ---\n${pageText}\n`;
+          }
+          
+          console.log('📄 PDF processed successfully with fallback method');
+          return fullText.trim();
+        } catch (fallbackError) {
+          console.error('❌ PDF fallback processing also failed:', fallbackError.message);
+          throw new Error(`PDF processing failed: ${error.message}`);
+        }
+      }
+      
       throw new Error(`PDF processing failed: ${error.message}`);
     }
   }

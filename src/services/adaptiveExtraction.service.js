@@ -647,6 +647,19 @@ Return JSON array with: name, role, phone, email, company, section`
    */
   async extractText(fileBuffer, mimeType) {
     const coreExtractor = require('./extraction.service');
+    
+    // Add debugging for PDF files
+    if (mimeType === 'application/pdf') {
+      console.log('🔍 PDF Buffer analysis:', {
+        type: fileBuffer.constructor.name,
+        isBuffer: fileBuffer instanceof Buffer,
+        isUint8Array: fileBuffer instanceof Uint8Array,
+        length: fileBuffer.length,
+        hasBuffer: 'buffer' in fileBuffer,
+        hasByteOffset: 'byteOffset' in fileBuffer
+      });
+    }
+    
     return await coreExtractor.extractTextFromDocument(fileBuffer, mimeType);
   }
 
