@@ -143,7 +143,7 @@ Return JSON array with: name, role, phone, email, company, section`
       });
 
       // Step 4: Execute extraction strategy
-      const result = await this.executeStrategy(strategy, text, options, extractionId);
+      const result = await this.executeStrategy(strategy, text, options, extractionId, fileBuffer, mimeType, fileName);
 
       // Step 5: Post-process and validate results
       const finalResult = await this.postProcessResults(result, documentAnalysis, options);
@@ -285,7 +285,7 @@ Return JSON array with: name, role, phone, email, company, section`
   /**
    * Execute the selected strategy
    */
-  async executeStrategy(strategy, text, options, extractionId) {
+  async executeStrategy(strategy, text, options, extractionId, fileBuffer, mimeType, fileName) {
     let simpleContacts = [];
     let aiContacts = [];
     let patternsUsed = [];

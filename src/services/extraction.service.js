@@ -275,9 +275,15 @@ class ExtractionService {
       if (buffer instanceof Uint8Array) {
         uint8Array = buffer;
       } else if (buffer instanceof Buffer) {
+        // Proper Buffer to Uint8Array conversion
+        uint8Array = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+      } else if (buffer instanceof ArrayBuffer) {
         uint8Array = new Uint8Array(buffer);
+      } else if (buffer && typeof buffer === 'object' && buffer.buffer) {
+        // Handle other buffer-like objects
+        uint8Array = new Uint8Array(buffer.buffer, buffer.byteOffset || 0, buffer.byteLength || buffer.length);
       } else {
-        // Convert any other buffer-like object to Uint8Array
+        // Last resort: try to create from whatever we have
         uint8Array = new Uint8Array(buffer);
       }
       
@@ -285,7 +291,10 @@ class ExtractionService {
         originalType: buffer.constructor.name,
         convertedType: uint8Array.constructor.name,
         bufferLength: buffer.length,
-        uint8ArrayLength: uint8Array.length
+        uint8ArrayLength: uint8Array.length,
+        hasBuffer: 'buffer' in buffer,
+        hasByteOffset: 'byteOffset' in buffer,
+        hasByteLength: 'byteLength' in buffer
       });
       
       const pdf = await pdfjs.getDocument({ data: uint8Array }).promise;

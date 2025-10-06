@@ -122,6 +122,36 @@ class SimpleExtractionService {
         name: 'name_phone_same_line',
         regex: /([A-Za-z\s]{2,})\s+([+\d\s\-\(\)]{10,})/gm,
         groups: ['name', 'phone']
+      },
+      // Pattern 19: Simple role: name format (common in call sheets)
+      {
+        name: 'simple_role_name',
+        regex: /^([A-Z][A-Z\s&\/]+):\s*([A-Za-z\s\-'\.]+)$/gm,
+        groups: ['role', 'name']
+      },
+      // Pattern 20: Role: Name followed by phone on next line
+      {
+        name: 'role_name_phone_nextline',
+        regex: /^([A-Z][A-Z\s&\/]+):\s*([A-Za-z\s\-'\.]+)\s*\n\s*([+\d\s\-\(\)]{8,})/gm,
+        groups: ['role', 'name', 'phone']
+      },
+      // Pattern 21: Flexible role/name with various separators
+      {
+        name: 'flexible_role_name',
+        regex: /^([A-Z][A-Z\s&\/]+)[\:\-\s]+([A-Za-z\s\-'\.]{2,})/gm,
+        groups: ['role', 'name']
+      },
+      // Pattern 22: Name with phone in parentheses
+      {
+        name: 'name_phone_parentheses',
+        regex: /([A-Za-z\s\-'\.]{2,})\s*\(([+\d\s\-]{8,})\)/gm,
+        groups: ['name', 'phone']
+      },
+      // Pattern 23: Very flexible contact extraction
+      {
+        name: 'flexible_contact',
+        regex: /([A-Za-z\s\-'\.]{2,})\s*[\/\|\-\s]*\s*([+\d\s\-\(\)]{8,})/gm,
+        groups: ['name', 'phone']
       }
     ];
 
