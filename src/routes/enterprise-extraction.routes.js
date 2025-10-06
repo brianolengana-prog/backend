@@ -214,55 +214,38 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     await usageService.incrementUsage(userId, 'upload', 1);
     await usageService.incrementUsage(userId, 'contact_extraction', extractionResult.contacts.length);
 
-    // Save extraction job to database
-    const jobRecord = await prisma.extractionJob.create({
-      data: {
-        id: extractionId,
-        userId,
-        title: originalname,
-        status: 'completed',
-        fileInfo: {
-          name: originalname,
-          size,
-          type: mimetype
-        },
-        extractedContactsCount: extractionResult.contacts.length,
-        metadata: extractionResult.metadata,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        completedAt: new Date()
-      }
-    });
-
-    // Save contacts to database
+    // Create a standard Job and save contacts using Contact schema fields
+    let jobId = null;
     if (extractionResult.contacts.length > 0) {
-      const contactsData = extractionResult.contacts.map(contact => ({
-        id: contact.id,
-        jobId: extractionId,
-        userId,
-        name: contact.name,
-        role: contact.role || null,
-        email: contact.email || null,
-        phone: contact.phone || null,
-        company: contact.company || null,
-        department: contact.department || null,
-        notes: contact.notes || null,
-        confidence: contact.confidence,
-        source: contact.source || 'enterprise',
-        metadata: {
-          patternName: contact.patternName,
-          patternCategory: contact.patternCategory,
-          validationScore: contact.validationScore,
-          section: contact.section
-        },
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }));
+      try {
+        // Ensure Profile exists to satisfy FK
+        await prisma.profile.upsert({ where: { userId }, update: {}, create: { userId } });
 
-      await prisma.contact.createMany({
-        data: contactsData,
-        skipDuplicates: true
-      });
+        const job = await prisma.job.create({
+          data: {
+            userId,
+            title: originalname,
+            fileName: originalname,
+            status: 'COMPLETED'
+          }
+        });
+        jobId = job.id;
+
+        const normalized = extractionResult.contacts.map(c => ({
+          name: c.name || 'Unknown',
+          email: c.email && c.email.trim() !== '' ? c.email : null,
+          phone: c.phone && c.phone.trim() !== '' ? c.phone : null,
+          role: c.role || null,
+          company: c.company || null,
+          isSelected: true,
+          userId,
+          jobId
+        }));
+
+        await prisma.contact.createMany({ data: normalized, skipDuplicates: true });
+      } catch (persistError) {
+        logger.error('Failed to persist enterprise contacts', { extractionId, error: persistError.message });
+      }
     }
 
     const processingTime = Date.now() - startTime;
@@ -277,7 +260,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     // Return enterprise response format
     res.json({
       success: true,
-      jobId: extractionId,
+      jobId: jobId,
       status: 'completed',
       result: {
         contacts: extractionResult.contacts,
