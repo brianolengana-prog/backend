@@ -86,6 +86,36 @@ class SimpleExtractionService {
         name: 'directors_format',
         regex: /^([A-Za-z\s\.]+)\t([A-Za-z\s\.]+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\s@]+@[^\s@]+\.[^\s@]+)\t([^\t]*)$/gm,
         groups: ['firstName', 'lastName', 'website', 'representative', 'category', 'email', 'location']
+      },
+      // Pattern 13: Call sheet crew format (Photographer: Coni Tarallo / 929.250.6798)
+      {
+        name: 'call_sheet_crew',
+        regex: /^([A-Za-z\s]+):\s*([A-Za-z\s]+)\s*\/\s*([\d\.\-\s]+)$/gm,
+        groups: ['role', 'name', 'phone']
+      },
+      // Pattern 13b: Call sheet crew with line breaks (Photographer:\nConi Tarallo / 929.250.6798)
+      {
+        name: 'call_sheet_crew_multiline',
+        regex: /^([A-Za-z\s]+):\s*\n\s*([A-Za-z\s]+)\s*\/\s*([\d\.\-\s]+)$/gm,
+        groups: ['role', 'name', 'phone']
+      },
+      // Pattern 14: Call sheet model format (Model: BIANCA FELICIANO / Ford Brett Pougnet / 917.783.8966)
+      {
+        name: 'call_sheet_model',
+        regex: /^Model:\s*([A-Za-z\s]+)\s*\/\s*([A-Za-z\s]+)\s*\/\s*([\d\.\-\s]+)$/gm,
+        groups: ['name', 'agency', 'phone']
+      },
+      // Pattern 15: Call sheet team format (Chief Creative Director: Siyana Huszar / (678) 386-4536)
+      {
+        name: 'call_sheet_team',
+        regex: /^([A-Za-z\s]+):\s*([A-Za-z\s]+)\s*\/\s*\(([\d\.\-\s]+)\)$/gm,
+        groups: ['role', 'name', 'phone']
+      },
+      // Pattern 16: Call sheet team format without parentheses (Social Manager: Kara Quinteros / (678) 386.4536)
+      {
+        name: 'call_sheet_team_no_parens',
+        regex: /^([A-Za-z\s]+):\s*([A-Za-z\s]+)\s*\/\s*([\d\.\-\s]+)$/gm,
+        groups: ['role', 'name', 'phone']
       }
     ];
 
@@ -405,6 +435,9 @@ class SimpleExtractionService {
             break;
           case 'website':
             contact.website = value;
+            break;
+          case 'agency':
+            contact.company = value;
             break;
         }
       }

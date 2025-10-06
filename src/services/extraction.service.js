@@ -266,8 +266,16 @@ class ExtractionService {
     const pdfjs = await this.ensureLibrary('pdfjs', true);
     
     try {
-      // Convert Buffer to Uint8Array if needed
-      const uint8Array = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+      // Ensure we have a proper Uint8Array for pdfjs
+      let uint8Array;
+      if (buffer instanceof Uint8Array) {
+        uint8Array = buffer;
+      } else if (buffer instanceof Buffer) {
+        uint8Array = new Uint8Array(buffer);
+      } else {
+        uint8Array = new Uint8Array(buffer);
+      }
+      
       const pdf = await pdfjs.getDocument({ data: uint8Array }).promise;
       let fullText = '';
       
@@ -283,6 +291,7 @@ class ExtractionService {
       console.log('📄 PDF processed successfully');
       return fullText.trim();
     } catch (error) {
+      console.error('❌ PDF processing error:', error.message);
       throw new Error(`PDF processing failed: ${error.message}`);
     }
   }
