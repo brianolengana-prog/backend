@@ -8,7 +8,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 const { authenticateToken } = require('../middleware/auth');
-const extractionService = require('../services/extraction-refactored.service');
+const extractionService = require('../services/extraction.service');
 const aiExtractionService = require('../services/aiExtraction.service');
 const optimizedAIExtractionService = require('../services/optimizedAIExtraction.service');
 const awsTextractService = require('../services/awsTextract.service');
@@ -20,10 +20,6 @@ const usageService = require('../services/usage.service');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
-// ✅ MIGRATED: Now using refactored extraction service (2025-10-06T08:37:32.049Z)
-// Original monolithic service backed up with timestamp suffix
-// New modular architecture provides better maintainability and performance
-
 const router = express.Router();
 
 // All extraction routes require authentication

@@ -1,5 +1,5 @@
 const winston = require('winston');
-const coreExtractor = require('./extraction-refactored.service');
+const coreExtractor = require('./extraction.service');
 
 const logger = winston.createLogger({
   level: 'info',

@@ -97,13 +97,14 @@ class DocumentProcessor {
       if (buffer instanceof Uint8Array) {
         uint8Array = buffer;
       } else if (buffer instanceof Buffer) {
-        // Proper Buffer to Uint8Array conversion
-        uint8Array = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        // Create a new Uint8Array from Buffer data
+        // This is the most reliable way to convert Buffer to Uint8Array
+        uint8Array = new Uint8Array(buffer.length);
+        for (let i = 0; i < buffer.length; i++) {
+          uint8Array[i] = buffer[i];
+        }
       } else if (buffer instanceof ArrayBuffer) {
         uint8Array = new Uint8Array(buffer);
-      } else if (buffer && typeof buffer === 'object' && buffer.buffer) {
-        // Handle other buffer-like objects
-        uint8Array = new Uint8Array(buffer.buffer, buffer.byteOffset || 0, buffer.byteLength || buffer.length);
       } else {
         // Last resort: try to create from whatever we have
         uint8Array = new Uint8Array(buffer);
@@ -166,11 +167,14 @@ class DocumentProcessor {
         try {
           console.log('🔄 Retrying PDF processing with alternative Buffer conversion...');
           
-          // Try converting Buffer to ArrayBuffer first, then to Uint8Array
+          // Try converting Buffer to Uint8Array using the same reliable method
           let uint8Array;
           if (buffer instanceof Buffer) {
-            const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
-            uint8Array = new Uint8Array(arrayBuffer);
+            // Create a new Uint8Array from Buffer data (same as above)
+            uint8Array = new Uint8Array(buffer.length);
+            for (let i = 0; i < buffer.length; i++) {
+              uint8Array[i] = buffer[i];
+            }
           } else {
             uint8Array = new Uint8Array(buffer);
           }

@@ -658,7 +658,7 @@ Return JSON array with: name, role, phone, email, company, section`
    * Extract text from file using core extractor
    */
   async extractText(fileBuffer, mimeType) {
-    const coreExtractor = require('./extraction-refactored.service');
+    const coreExtractor = require('./extraction.service');
     
     // Add debugging for PDF files
     if (mimeType === 'application/pdf') {
