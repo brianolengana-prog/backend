@@ -147,11 +147,11 @@ class ContactsService {
             { name: { contains: search, mode: 'insensitive' } },
             { email: { contains: search, mode: 'insensitive' } },
             { phone: { contains: search, mode: 'insensitive' } },
-            { role: { contains: search, mode: 'insensitive' } }
+            { role: { contains: role, mode: 'insensitive' } }
           ]
         }),
         ...(role && { role: { contains: role, mode: 'insensitive' } }),
-        ...(productionId && { productionId })
+        ...(productionId && { job: { productionId } })
       };
 
       const [contacts, total] = await Promise.all([
@@ -161,11 +161,12 @@ class ContactsService {
           take: limit,
           orderBy: { createdAt: 'desc' },
           include: {
-            production: {
+            job: {
               select: {
                 id: true,
                 title: true,
-                type: true
+                status: true,
+                createdAt: true
               }
             }
           }
@@ -173,15 +174,8 @@ class ContactsService {
         prisma.contact.count({ where })
       ]);
 
-      return {
-        contacts,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
-      };
+      // Return just the contacts array to match frontend expectations
+      return contacts;
     } catch (error) {
       console.error('❌ Error getting contacts:', error);
       throw error;
@@ -201,11 +195,13 @@ class ContactsService {
           userId
         },
         include: {
-          production: {
+          job: {
             select: {
               id: true,
               title: true,
-              type: true
+              status: true,
+              createdAt: true,
+              productionId: true
             }
           }
         }
