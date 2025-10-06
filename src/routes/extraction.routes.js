@@ -23,6 +23,20 @@ const enterpriseConfig = require('../config/enterprise.config');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
+
+// Ensure a Profile row exists for a given userId (Job.userId references Profile.userId)
+const ensureProfileForUser = async (userId) => {
+  try {
+    await prisma.profile.upsert({
+      where: { userId },
+      update: {},
+      create: { userId }
+    });
+  } catch (e) {
+    console.error('❌ Failed to ensure profile for user:', userId, e.message);
+    throw e;
+  }
+};
 // ✅ MIGRATED: Now using refactored extraction service (2025-10-06T08:37:32.049Z)
 // Original monolithic service backed up with timestamp suffix
 // New modular architecture provides better maintainability and performance
@@ -259,6 +273,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     let jobId = null;
     if (result.contacts && result.contacts.length > 0) {
       try {
+        // Satisfy FK: jobs.user_id -> profiles.user_id
+        await ensureProfileForUser(userId);
         const job = await prisma.job.create({
           data: {
             userId,
@@ -579,6 +595,7 @@ router.post('/upload-ai', upload.single('file'), async (req, res) => {
     let jobId = null;
     if (result.success && result.contacts && result.contacts.length > 0) {
       try {
+        await ensureProfileForUser(userId);
         const job = await prisma.job.create({
           data: {
             userId,
@@ -680,6 +697,7 @@ router.post('/upload-aws-textract', upload.single('file'), async (req, res) => {
     let jobId = null;
     if (contacts.length > 0) {
       try {
+        await ensureProfileForUser(userId);
         const job = await prisma.job.create({
           data: {
             userId,
@@ -755,6 +773,7 @@ router.post('/upload-adaptive', upload.single('file'), async (req, res) => {
     let jobId = null;
     if (result.success && result.contacts && result.contacts.length > 0) {
       try {
+        await ensureProfileForUser(userId);
         const job = await prisma.job.create({
           data: {
             userId,
@@ -826,6 +845,7 @@ router.post('/upload-pattern', upload.single('file'), async (req, res) => {
     let jobId = null;
     if (result.success && result.contacts && result.contacts.length > 0) {
       try {
+        await ensureProfileForUser(userId);
         const job = await prisma.job.create({
           data: {
             userId,
