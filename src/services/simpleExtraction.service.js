@@ -21,10 +21,10 @@ class SimpleExtractionService {
         regex: /^([A-Z][A-Z\s]+)\s*\n\s*([A-Za-z\s]+)\s*\n\s*([^\n@]+@[^\n]+)\s*\n\s*([+\d\s\-\(\)]+)/gm,
         groups: ['role', 'name', 'email', 'phone']
       },
-      // Pattern 2: Name - Role - Contact info on same line (optimized)
+      // Pattern 2: Name - Role - Contact info on same line
       {
         name: 'name_role_contact',
-        regex: /([A-Za-z\s]{1,50})\s*[-–—]\s*([A-Z][A-Z\s]{1,30})\s*[-–—]\s*([^\s@]+@[^\s@]+\.[^\s@]+)\s*[-–—]\s*([+\d\s\-\(\)]{7,20})/gm,
+        regex: /([A-Za-z\s]+)\s*[-–—]\s*([A-Z][A-Z\s]+)\s*[-–—]\s*([^\n@]+@[^\n]+)\s*[-–—]\s*([+\d\s\-\(\)]+)/gm,
         groups: ['name', 'role', 'email', 'phone']
       },
       // Pattern 3: Role: Name, Email, Phone
@@ -68,54 +68,6 @@ class SimpleExtractionService {
         name: 'pipe_name_company_role_email_phone',
         regex: /^([^|]+)\|([^|]+)\|([^|]+)\|([^|\s]+@[^|\s]+)\|(.+)$/gm,
         groups: ['name', 'company', 'role', 'email', 'phone']
-      },
-      // Pattern 10: Tabular data with headers (First Name\tLast Name\tWebsite\tEmail)
-      {
-        name: 'tabular_with_headers',
-        regex: /^([A-Za-z\s\.]+)\t([A-Za-z\s\.]+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\s@]+@[^\s@]+\.[^\s@]+)\t([^\t]*)$/gm,
-        groups: ['firstName', 'lastName', 'website', 'representative', 'category', 'email', 'location']
-      },
-      // Pattern 11: Simple tabular format (Name\tWebsite\tEmail)
-      {
-        name: 'simple_tabular',
-        regex: /^([A-Za-z\s\.]+)\t([A-Za-z\s\.]+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\s@]+@[^\s@]+\.[^\s@]+)\t([^\t]*)$/gm,
-        groups: ['firstName', 'lastName', 'website', 'representative', 'category', 'email', 'location']
-      },
-      // Pattern 12: Directors format (A.V\tRockwell\thttp://...\tY\t\tav.rockwell@example.com)
-      {
-        name: 'directors_format',
-        regex: /^([A-Za-z\s\.]+)\t([A-Za-z\s\.]+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\s@]+@[^\s@]+\.[^\s@]+)\t([^\t]*)$/gm,
-        groups: ['firstName', 'lastName', 'website', 'representative', 'category', 'email', 'location']
-      },
-      // Pattern 13: Call sheet crew format (Photographer: Coni Tarallo / 929.250.6798)
-      {
-        name: 'call_sheet_crew',
-        regex: /^([A-Za-z\s]+):\s*([A-Za-z\s]+)\s*\/\s*([\d\.\-\s]+)$/gm,
-        groups: ['role', 'name', 'phone']
-      },
-      // Pattern 13b: Call sheet crew with line breaks (Photographer:\nConi Tarallo / 929.250.6798)
-      {
-        name: 'call_sheet_crew_multiline',
-        regex: /^([A-Za-z\s]+):\s*\n\s*([A-Za-z\s]+)\s*\/\s*([\d\.\-\s]+)$/gm,
-        groups: ['role', 'name', 'phone']
-      },
-      // Pattern 14: Call sheet model format (Model: BIANCA FELICIANO / Ford Brett Pougnet / 917.783.8966)
-      {
-        name: 'call_sheet_model',
-        regex: /^Model:\s*([A-Za-z\s]+)\s*\/\s*([A-Za-z\s]+)\s*\/\s*([\d\.\-\s]+)$/gm,
-        groups: ['name', 'agency', 'phone']
-      },
-      // Pattern 15: Call sheet team format (Chief Creative Director: Siyana Huszar / (678) 386-4536)
-      {
-        name: 'call_sheet_team',
-        regex: /^([A-Za-z\s]+):\s*([A-Za-z\s]+)\s*\/\s*\(([\d\.\-\s]+)\)$/gm,
-        groups: ['role', 'name', 'phone']
-      },
-      // Pattern 16: Call sheet team format without parentheses (Social Manager: Kara Quinteros / (678) 386.4536)
-      {
-        name: 'call_sheet_team_no_parens',
-        regex: /^([A-Za-z\s]+):\s*([A-Za-z\s]+)\s*\/\s*([\d\.\-\s]+)$/gm,
-        groups: ['role', 'name', 'phone']
       }
     ];
 
@@ -304,25 +256,7 @@ class SimpleExtractionService {
       try {
         logger.info(`🔍 Testing pattern ${i + 1}/${this.contactPatterns.length}: ${pattern.name}`);
         
-        // Add per-pattern timeout to prevent hanging
-        const patternTimeout = 5000; // 5 seconds per pattern
-        const patternPromise = new Promise((resolve) => {
-          try {
-            const matches = [...text.matchAll(pattern.regex)];
-            resolve(matches);
-          } catch (error) {
-            resolve([]);
-          }
-        });
-        
-        const timeoutPromise = new Promise((resolve) => {
-          setTimeout(() => {
-            logger.warn(`⏰ Pattern ${pattern.name} timed out after ${patternTimeout}ms`);
-            resolve([]);
-          }, patternTimeout);
-        });
-        
-        const matches = await Promise.race([patternPromise, timeoutPromise]);
+        const matches = [...text.matchAll(pattern.regex)];
         logger.info(`📊 Pattern ${pattern.name} found ${matches.length} matches`);
         
         // Limit matches per pattern to prevent hanging
@@ -411,16 +345,6 @@ class SimpleExtractionService {
           case 'name':
             contact.name = value;
             break;
-          case 'firstName':
-            contact.name = value;
-            break;
-          case 'lastName':
-            if (contact.name) {
-              contact.name = `${contact.name} ${value}`;
-            } else {
-              contact.name = value;
-            }
-            break;
           case 'role':
             contact.role = value;
             break;
@@ -429,15 +353,6 @@ class SimpleExtractionService {
             break;
           case 'phone':
             contact.phone = value;
-            break;
-          case 'company':
-            contact.company = value;
-            break;
-          case 'website':
-            contact.website = value;
-            break;
-          case 'agency':
-            contact.company = value;
             break;
         }
       }
