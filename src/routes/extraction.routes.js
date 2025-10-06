@@ -134,21 +134,75 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     const fileType = fileTypeMap[req.file.mimetype] || 'pdf';
   // Always process synchronously for stability with timeout
   try {
-    // Extract text first
+    // Extract text using the refactored service
     let extractedText = '';
-    if (req.file.mimetype === 'application/pdf') {
-      extractedText = await extractionService.extractTextFromPDF(req.file.buffer);
-    } else if (req.file.mimetype.includes('wordprocessingml') || req.file.mimetype === 'application/msword') {
-      extractedText = await extractionService.extractTextFromDOCX(req.file.buffer);
-    } else if (req.file.mimetype.includes('spreadsheetml') || req.file.mimetype === 'application/vnd.ms-excel') {
-      extractedText = await extractionService.extractTextFromXLSX(req.file.buffer);
-    } else if (req.file.mimetype === 'text/csv') {
+    
+    console.log('📄 Extracting text from document...');
+    
+    if (req.file.mimetype === 'text/csv' || req.file.mimetype === 'text/plain') {
+      // Handle text files directly
       extractedText = req.file.buffer.toString('utf-8');
-    } else if (req.file.mimetype === 'text/plain') {
-      extractedText = req.file.buffer.toString('utf-8');
-    } else if (req.file.mimetype.startsWith('image/')) {
-      extractedText = await extractionService.extractTextFromImage(req.file.buffer);
+    } else {
+      // Use the refactored extraction service for all other file types
+      try {
+        // Wait a moment for service initialization if needed
+        let retries = 3;
+        while (retries > 0 && typeof extractionService.extractTextFromDocument !== 'function') {
+          console.log('⏳ Waiting for extraction service initialization...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          retries--;
+        }
+        
+        // Final check
+        if (typeof extractionService.extractTextFromDocument !== 'function') {
+          console.error('❌ extractTextFromDocument method not available after retries');
+          throw new Error('Extraction service not properly initialized');
+        }
+        
+        extractedText = await extractionService.extractTextFromDocument(req.file.buffer, req.file.mimetype);
+      } catch (textError) {
+        console.error('❌ Text extraction failed:', textError.message);
+        
+        // Fallback: try to use the legacy extraction service
+        console.log('🔄 Attempting fallback to legacy extraction...');
+        try {
+          const legacyResult = await adaptiveExtractionService.extractContacts(
+            req.file.buffer,
+            req.file.mimetype,
+            req.file.originalname,
+            { userId, ...parsedOptions }
+          );
+          
+          if (legacyResult && legacyResult.success && legacyResult.contacts) {
+            console.log('✅ Legacy extraction successful, returning result directly');
+            
+            // Record usage and return result directly
+            await usageService.incrementUsage(userId, 'upload', 1);
+            
+            return res.json({
+              success: true,
+              jobId: `legacy_${Date.now()}`,
+              status: 'completed',
+              result: {
+                contacts: legacyResult.contacts,
+                metadata: legacyResult.metadata || {}
+              },
+              contacts: legacyResult.contacts,
+              usage: await usageService.getUsageInfo(userId),
+              documentType: 'call-sheet',
+              productionType: 'extraction',
+              processedChunks: 1
+            });
+          }
+        } catch (legacyError) {
+          console.error('❌ Legacy extraction also failed:', legacyError.message);
+        }
+        
+        throw new Error(`Failed to extract text from ${req.file.mimetype}: ${textError.message}`);
+      }
     }
+    
+    console.log('✅ Text extracted successfully, length:', extractedText.length);
 
     // Use migration service to route to appropriate extraction system
     const extractionPromise = migrationService.extractContacts(extractedText, {
