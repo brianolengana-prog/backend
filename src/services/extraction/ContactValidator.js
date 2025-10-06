@@ -76,11 +76,33 @@ class ContactValidator {
   cleanName(name) {
     if (!name || typeof name !== 'string') return '';
     
-    return name.trim()
+    let cleaned = name.trim();
+    
+    // Remove common domain prefixes that get captured
+    cleaned = cleaned.replace(/^(com|gmail\.com|loreal\.com|primecontent\.com|seemanagement\.com|danielrothmandp\.com)\s+/i, '');
+    
+    // Remove table headers and formatting artifacts
+    cleaned = cleaned.replace(/^(PRODUCTION|Name|Phone|Call Time|Location|E-mail|VIDEO CALL SHEET DATE)\s+/i, '');
+    
+    // Remove role prefixes if they're duplicated in the name
+    const roleWords = ['Producer', 'Photographer', 'Director', 'Assistant', 'Makeup', 'Stylist', 'Gaffer', 'Grip', 'Colorist', 'Executive Producer', 'First Assistant', 'Director of Photography', 'AC', 'iPhone Video', 'Wardrobe Stylist', 'Set Design', 'Production Assistant'];
+    roleWords.forEach(role => {
+      const regex = new RegExp(`^${role}\\s+`, 'i');
+      cleaned = cleaned.replace(regex, '');
+    });
+    
+    // Clean up formatting
+    cleaned = cleaned
       .replace(/\s+/g, ' ')
       .replace(/[^\w\s\-\.]/g, '')
-      .replace(/\b\w/g, l => l.toUpperCase()) // Title case
       .trim();
+    
+    // Apply title case only if it looks like a proper name
+    if (cleaned.length > 0 && cleaned.length < 50) {
+      cleaned = cleaned.replace(/\b\w/g, l => l.toUpperCase());
+    }
+    
+    return cleaned;
   }
 
   /**
@@ -134,8 +156,23 @@ class ContactValidator {
   cleanPhone(phone) {
     if (!phone || typeof phone !== 'string') return '';
     
+    let cleaned = phone.trim();
+    
+    // Remove "- -" placeholder
+    if (cleaned === '- -' || cleaned === '--') {
+      return '';
+    }
+    
+    // Remove trailing numbers that aren't part of phone (like "8", "10", "11")
+    cleaned = cleaned.replace(/\s+\d{1,2}$/, '');
+    
     // Extract digits
-    const digits = phone.replace(/\D/g, '');
+    const digits = cleaned.replace(/\D/g, '');
+    
+    // Skip if no digits or too few digits
+    if (digits.length < 7) {
+      return '';
+    }
     
     if (digits.length === 10) {
       return `(${digits.substring(0, 3)}) ${digits.substring(3, 6)}-${digits.substring(6)}`;
@@ -146,8 +183,8 @@ class ContactValidator {
       return `(${us.substring(0, 3)}) ${us.substring(3, 6)}-${us.substring(6)}`;
     }
     
-    // Return original if we can't format it
-    return phone.trim();
+    // Return cleaned version if we can't format it properly
+    return cleaned;
   }
 
   /**
@@ -224,8 +261,8 @@ class ContactValidator {
     // Check for common extraction errors
     const name = contact.name || '';
     
-    // Names that are too short or contain numbers/symbols
-    if (name.length < 2 || /\d/.test(name) || /[^\w\s\-\.]/.test(name)) {
+    // Names that are too short or contain inappropriate content
+    if (name.length < 2) {
       return true;
     }
 
@@ -234,11 +271,31 @@ class ContactValidator {
       /^(page|line|row|column|table|header|footer)/i,
       /^(call|time|date|location|address)/i,
       /^(note|notes|important|please)/i,
+      /^(tuesday|monday|wednesday|thursday|friday|saturday|sunday)$/i,
+      /^(production|name|phone|call time|location|e-mail)$/i,
       /^\d+$/,
-      /^[A-Z]{1}$/
+      /^[A-Z]{1,2}$/,
+      /^th Fl$/i, // Specific to your data
+      /mail Executive Producer/i, // Table header artifacts
+      /august 19th, 2025/i // Date artifacts
     ];
 
     if (nonNamePatterns.some(pattern => pattern.test(name))) {
+      return true;
+    }
+
+    // Check for names that are too long (likely table headers or descriptions)
+    if (name.length > 80) {
+      return true;
+    }
+
+    // Check for names that contain email-like content
+    if (name.includes('@') || name.includes('.com') || name.includes('gmail') || name.includes('loreal')) {
+      return true;
+    }
+
+    // Check if the name contains call time or location info
+    if (name.includes('Call Time') || name.includes('Location') || name.includes('E-mail')) {
       return true;
     }
 
