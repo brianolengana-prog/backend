@@ -43,8 +43,8 @@ const ensureProfileForUser = async (userId) => {
 
 const router = express.Router();
 
-// Initialize enterprise migration service
-const migrationService = new ExtractionMigrationService();
+// Initialize enterprise migration service (singleton instance)
+const migrationService = ExtractionMigrationService;
 
 // All extraction routes require authentication
 router.use(authenticateToken);

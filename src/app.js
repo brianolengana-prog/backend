@@ -16,6 +16,7 @@ const subscriptionRoutes = require('./routes/subscription.routes');
 const billingRoutes = require('./routes/billing.routes');
 const stripeRoutes = require('./routes/stripe.routes');
 const extractionRoutes = require('./routes/extraction.routes');
+const textExtractionRoutes = require('./routes/textExtraction.routes');
 const jobsRoutes = require('./routes/jobs.routes');
 const usageRoutes = require('./routes/usage.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
@@ -97,6 +98,7 @@ app.use('/api/subscription', billingLimiter, subscriptionRoutes);
 app.use('/api/billing', billingLimiter, billingRoutes);
 app.use('/api/stripe', billingLimiter, stripeRoutes);
 app.use('/api/extraction', extractionLimiter, extractionRoutes);
+app.use('/api/extraction', textExtractionRoutes); // Text processing routes
 app.use('/api/jobs', jobsRoutes);
 app.use('/api/usage', usageRoutes);
 app.use('/api/dashboard', dashboardRoutes);

@@ -248,9 +248,9 @@ Provide analysis in JSON format:
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4",
+        model: "gpt-4o-mini",
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 2000,
+        max_tokens: 1500,
         temperature: 0.1
       });
 
@@ -284,7 +284,7 @@ Provide analysis in JSON format:
       
       try {
         const response = await this.openai.chat.completions.create({
-          model: "gpt-4",
+          model: "gpt-4o-mini",
           messages: [
             {
               role: "system",
@@ -386,7 +386,7 @@ Return validated contacts with improved confidence scores and any corrections ne
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4",
+        model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
@@ -433,7 +433,7 @@ Return enhanced contacts in the same JSON format:`;
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4",
+        model: "gpt-4o-mini",
         messages: [
           {
             role: "system",

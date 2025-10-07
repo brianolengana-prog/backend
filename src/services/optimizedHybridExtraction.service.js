@@ -1,23 +1,16 @@
 /**
  * Optimized Hybrid Extraction Service
  * 
- * Enterprise-grade extraction that intelligently combines:
- * - Intelligent strategy selection based on document analysis
- * - GPT-4o Mini optimization with token management
- * - Cost-aware processing based on user plan
- * - Performance learning and adaptation
- * - Real-time service health monitoring
+ * Implements the optimized AI + Pattern hybrid strategy:
+ * 1. Run patterns first to extract high-confidence contacts
+ * 2. Use AI only for gap-filling and enhancement
+ * 3. Optimized token usage with gpt-4o-mini
+ * 4. Context-aware prompting
+ * 5. Intelligent fallback strategies
  */
 
-const intelligentStrategy = require('./intelligentStrategy.service');
-const extractionService = require('./extraction.service');
-const aiExtractionService = require('./aiExtraction.service');
-const optimizedAIExtractionService = require('./optimizedAIExtraction.service');
-const awsTextractService = require('./awsTextract.service');
-const documentAnalysisService = require('./documentAnalysis.service');
-const adaptivePatternService = require('./adaptivePattern.service');
-const contextAwareAIService = require('./contextAwareAI.service');
-const { PrismaClient } = require('@prisma/client');
+const { OpenAI } = require('openai');
+const RobustCallSheetExtractor = require('./robustCallSheetExtractor.service');
 const winston = require('winston');
 
 const logger = winston.createLogger({
@@ -27,614 +20,319 @@ const logger = winston.createLogger({
     winston.format.json()
   ),
   transports: [
-    new winston.transports.Console(),
-    new winston.transports.File({ filename: 'logs/optimized-hybrid.log' })
+    new winston.transports.Console()
   ]
 });
 
 class OptimizedHybridExtractionService {
   constructor() {
-    this.prisma = new PrismaClient();
-    this.strategyService = intelligentStrategy;
-    this.processingStats = new Map();
+    this.openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
+    });
+    this.isAIAvailable = !!process.env.OPENAI_API_KEY;
     
-    // Service health tracking
-    this.serviceHealth = {
-      ai: { available: true, lastCheck: Date.now() },
-      textract: { available: true, lastCheck: Date.now() },
-      pattern: { available: true, lastCheck: Date.now() }
-    };
-
-    logger.info('🚀 Optimized Hybrid Extraction Service initialized');
+    // Use robust call sheet extractor for pattern matching
+    this.robustExtractor = new RobustCallSheetExtractor();
+    this.confidenceThreshold = 0.7; // Only use AI if patterns find < 70% confidence
   }
 
+
   /**
-   * Main optimized extraction method with intelligent context awareness
+   * Main extraction method - optimized hybrid approach
    */
-  async extractContacts(fileBuffer, mimeType, fileName, options = {}) {
+  async extractContacts(text, options = {}) {
+    const extractionId = options.extractionId || `opt_${Date.now()}`;
     const startTime = Date.now();
-    const extractionId = this.generateExtractionId();
 
     try {
-      logger.info('🚀 Starting intelligent hybrid extraction', {
+      logger.info('🚀 Starting optimized hybrid extraction', {
         extractionId,
-        fileName,
-        mimeType,
-        fileSize: fileBuffer.length,
-        userId: options.userId
+        textLength: text.length
       });
 
-      // Step 1: Document analysis for context awareness
-      const extractedText = await this.extractTextFromDocument(fileBuffer, mimeType);
-      const documentAnalysis = await documentAnalysisService.analyzeDocument(
-        extractedText, 
-        fileName, 
-        mimeType
-      );
-
-      // Step 2: Generate adaptive patterns based on analysis
-      const adaptivePatterns = await adaptivePatternService.generatePatterns(
-        documentAnalysis, 
-        extractedText
-      );
-
-      // Step 3: Intelligent strategy selection with context
-      const strategy = await this.strategyService.selectOptimalStrategy(
-        fileBuffer, 
-        mimeType, 
-        fileName, 
-        {
-          ...options,
-          documentAnalysis,
-          adaptivePatterns
-        }
-      );
-
-      logger.info('🎯 Selected context-aware strategy', {
+      // Step 1: Robust pattern-based extraction (comprehensive call sheet patterns)
+      const patternResults = await this.robustExtractor.extractContacts(text, {
         extractionId,
-        strategy: strategy.name,
-        confidence: strategy.confidence,
-        reasoning: strategy.reasoning,
-        documentStructure: documentAnalysis.documentStructure
+        ...options
+      });
+      
+      // Step 2: Calculate confidence score
+      const confidenceScore = this.calculateConfidenceScore(patternResults);
+      
+      logger.info('📊 Robust pattern extraction results', {
+        extractionId,
+        contactsFound: patternResults.contacts?.length || 0,
+        confidenceScore,
+        needsAI: confidenceScore < this.confidenceThreshold,
+        patternsUsed: patternResults.metadata?.patternsUsed
       });
 
-      // Step 4: Execute extraction with full context
-      let result;
-      if (strategy.name === 'context_aware_ai' || documentAnalysis.confidence > 0.8) {
-        result = await contextAwareAIService.extractContacts(fileBuffer, mimeType, fileName, {
-          ...options,
-          documentAnalysis,
-          adaptivePatterns
+      let finalContacts = patternResults.contacts || [];
+      let aiUsed = false;
+
+      // Step 3: AI enhancement only if needed and patterns found few contacts
+      if ((confidenceScore < this.confidenceThreshold || finalContacts.length < 3) && this.isAIAvailable) {
+        logger.info('🤖 Applying AI enhancement', { 
+          extractionId,
+          reason: confidenceScore < this.confidenceThreshold ? 'low_confidence' : 'few_contacts'
         });
-      } else {
-        result = await this.executeExtractionWithMonitoring(
-          strategy,
-          fileBuffer,
-          mimeType,
-          fileName,
-          options,
-          extractionId
-        );
-      }
-
-      // Step 5: Post-process with context awareness
-      const finalResult = await this.postProcessWithContext(
-        result,
-        strategy,
-        documentAnalysis,
-        adaptivePatterns,
-        options,
-        extractionId
-      );
-
-      // Step 4: Update performance metrics
-      const processingTime = Date.now() - startTime;
-      await this.updatePerformanceMetrics(strategy.name, processingTime, finalResult, extractionId);
-
-      logger.info('✅ Optimized hybrid extraction completed', {
-        extractionId,
-        strategy: strategy.name,
-        processingTime,
-        contactsFound: finalResult.contacts?.length || 0,
-        confidence: strategy.confidence
-      });
-
-      return finalResult;
-
-    } catch (error) {
-      logger.error('❌ Optimized hybrid extraction failed', {
-        extractionId,
-        error: error.message,
-        stack: error.stack
-      });
-
-      // Attempt fallback strategy
-      return await this.executeFallbackStrategy(fileBuffer, mimeType, fileName, options, extractionId);
-    }
-  }
-
-  /**
-   * Execute extraction with real-time monitoring
-   */
-  async executeExtractionWithMonitoring(strategy, fileBuffer, mimeType, fileName, options, extractionId) {
-    const monitoring = {
-      startTime: Date.now(),
-      steps: [],
-      errors: [],
-      performance: {}
-    };
-
-    try {
-      // Update service health before processing
-      await this.updateServiceHealth();
-
-      let result;
-      let actualMethod = strategy.name;
-
-      // Execute based on selected strategy
-      switch (strategy.name) {
-        case 'pattern-only':
-          result = await this.executePatternExtraction(fileBuffer, mimeType, fileName, options, monitoring);
-          break;
-
-        case 'ai-only':
-          result = await this.executeAIExtraction(fileBuffer, mimeType, fileName, options, monitoring);
-          break;
-
-        case 'aws-textract-only':
-          result = await this.executeTextractExtraction(fileBuffer, mimeType, fileName, options, monitoring);
-          break;
-
-        case 'hybrid-pattern-ai':
-          result = await this.executeHybridPatternAI(fileBuffer, mimeType, fileName, options, monitoring);
-          break;
-
-        case 'hybrid-textract-ai':
-          result = await this.executeHybridTextractAI(fileBuffer, mimeType, fileName, options, monitoring);
-          break;
-
-        case 'hybrid-adaptive':
-          result = await this.executeAdaptiveHybrid(fileBuffer, mimeType, fileName, options, monitoring);
-          break;
-
-        default:
-          throw new Error(`Unknown strategy: ${strategy.name}`);
-      }
-
-      // Add monitoring data to result
-      result.monitoring = {
-        extractionId,
-        strategy: strategy.name,
-        actualMethod,
-        processingTime: Date.now() - monitoring.startTime,
-        steps: monitoring.steps,
-        errors: monitoring.errors,
-        performance: monitoring.performance
-      };
-
-      return result;
-
-    } catch (error) {
-      monitoring.errors.push({
-        step: 'execution',
-        error: error.message,
-        timestamp: Date.now()
-      });
-
-      throw error;
-    }
-  }
-
-  /**
-   * Execute pattern-only extraction
-   */
-  async executePatternExtraction(fileBuffer, mimeType, fileName, options, monitoring) {
-    monitoring.steps.push({ step: 'pattern-extraction', startTime: Date.now() });
-
-    const result = await extractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-
-    monitoring.steps[monitoring.steps.length - 1].endTime = Date.now();
-    monitoring.performance.patternExtraction = Date.now() - monitoring.steps[monitoring.steps.length - 1].startTime;
-
-    return result;
-  }
-
-  /**
-   * Execute AI-only extraction with GPT-4o Mini optimization
-   */
-  async executeAIExtraction(fileBuffer, mimeType, fileName, options, monitoring) {
-    monitoring.steps.push({ step: 'ai-extraction', startTime: Date.now() });
-
-    // Check if we should use optimized AI service
-    const shouldUseOptimized = this.shouldUseOptimizedAI(fileBuffer, options);
-    
-    let result;
-    if (shouldUseOptimized) {
-      result = await optimizedAIExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-    } else {
-      result = await aiExtractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-    }
-
-    monitoring.steps[monitoring.steps.length - 1].endTime = Date.now();
-    monitoring.performance.aiExtraction = Date.now() - monitoring.steps[monitoring.steps.length - 1].startTime;
-
-    return result;
-  }
-
-  /**
-   * Execute AWS Textract extraction
-   */
-  async executeTextractExtraction(fileBuffer, mimeType, fileName, options, monitoring) {
-    monitoring.steps.push({ step: 'textract-extraction', startTime: Date.now() });
-
-    const result = await awsTextractService.extractTextFromDocument(fileBuffer, mimeType, fileName, options);
-
-    monitoring.steps[monitoring.steps.length - 1].endTime = Date.now();
-    monitoring.performance.textractExtraction = Date.now() - monitoring.steps[monitoring.steps.length - 1].startTime;
-
-    return result;
-  }
-
-  /**
-   * Execute hybrid pattern + AI extraction
-   */
-  async executeHybridPatternAI(fileBuffer, mimeType, fileName, options, monitoring) {
-    monitoring.steps.push({ step: 'hybrid-pattern-ai', startTime: Date.now() });
-
-    // Step 1: Try pattern extraction first (fast and free)
-    let patternResult;
-    try {
-      patternResult = await this.executePatternExtraction(fileBuffer, mimeType, fileName, options, monitoring);
-    } catch (error) {
-      logger.warn('⚠️ Pattern extraction failed in hybrid', { error: error.message });
-      patternResult = { success: false, contacts: [] };
-    }
-
-    // Step 2: If pattern found few contacts, try AI
-    if (patternResult.success && patternResult.contacts && patternResult.contacts.length < 10) {
-      try {
-        const aiResult = await this.executeAIExtraction(fileBuffer, mimeType, fileName, options, monitoring);
         
-        if (aiResult.success && aiResult.contacts && aiResult.contacts.length > patternResult.contacts.length) {
-          logger.info('✅ AI found more contacts than pattern, using AI result');
-          return aiResult;
-        }
-      } catch (error) {
-        logger.warn('⚠️ AI extraction failed in hybrid', { error: error.message });
+        const aiResults = await this.enhanceWithAI(text, finalContacts, extractionId);
+        finalContacts = this.mergeContacts(finalContacts, aiResults);
+        aiUsed = true;
       }
-    }
 
-    monitoring.steps[monitoring.steps.length - 1].endTime = Date.now();
-    return patternResult;
-  }
+      // Step 4: Clean and validate results
+      const cleanedContacts = this.cleanAndValidateContacts(finalContacts);
 
-  /**
-   * Execute hybrid Textract + AI extraction
-   */
-  async executeHybridTextractAI(fileBuffer, mimeType, fileName, options, monitoring) {
-    monitoring.steps.push({ step: 'hybrid-textract-ai', startTime: Date.now() });
+      const processingTime = Date.now() - startTime;
 
-    // Step 1: Extract text with Textract
-    const textractResult = await this.executeTextractExtraction(fileBuffer, mimeType, fileName, options, monitoring);
-    
-    if (!textractResult.success) {
-      throw new Error(`Textract failed: ${textractResult.error}`);
-    }
-
-    // Step 2: Extract contacts from text using AI
-    const aiResult = await optimizedAIExtractionService.extractContactsFromText(
-      textractResult.text, 
-      options
-    );
-
-    monitoring.steps[monitoring.steps.length - 1].endTime = Date.now();
-    return aiResult;
-  }
-
-  /**
-   * Execute adaptive hybrid extraction
-   */
-  async executeAdaptiveHybrid(fileBuffer, mimeType, fileName, options, monitoring) {
-    monitoring.steps.push({ step: 'adaptive-hybrid', startTime: Date.now() });
-
-    // Analyze document in real-time
-    const docAnalysis = await this.strategyService.analyzeDocument(fileBuffer, mimeType, fileName);
-    
-    // Choose execution path based on real-time analysis
-    if (docAnalysis.isScannedPDF) {
-      return await this.executeHybridTextractAI(fileBuffer, mimeType, fileName, options, monitoring);
-    } else if (docAnalysis.complexityScore > 0.7) {
-      return await this.executeAIExtraction(fileBuffer, mimeType, fileName, options, monitoring);
-    } else if (docAnalysis.estimatedContacts < 20) {
-      return await this.executePatternExtraction(fileBuffer, mimeType, fileName, options, monitoring);
-    } else {
-      return await this.executeHybridPatternAI(fileBuffer, mimeType, fileName, options, monitoring);
-    }
-  }
-
-  /**
-   * Post-process and validate results
-   */
-  async postProcessResults(result, strategy, fileBuffer, mimeType, fileName, options, extractionId) {
-    if (!result.success) {
-      return result;
-    }
-
-    // Validate and clean contacts
-    const cleanedContacts = this.validateAndCleanContacts(result.contacts || []);
-    
-    // Calculate quality metrics
-    const qualityMetrics = this.calculateQualityMetrics(cleanedContacts, fileBuffer, mimeType);
-    
-    // Add metadata
-    result.metadata = {
-      ...result.metadata,
-      extractionId,
-      strategy: strategy.name,
-      confidence: strategy.confidence,
-      qualityMetrics,
-      processingTime: result.monitoring?.processingTime || 0,
-      optimized: true,
-      hybridProcessing: true
-    };
-
-    result.contacts = cleanedContacts;
-
-    return result;
-  }
-
-  /**
-   * Execute fallback strategy
-   */
-  async executeFallbackStrategy(fileBuffer, mimeType, fileName, options, extractionId) {
-    logger.info('🔄 Executing fallback strategy', { extractionId });
-
-    try {
-      // Always fallback to pattern extraction as it's most reliable
-      const result = await extractionService.extractContacts(fileBuffer, mimeType, fileName, options);
-      
-      result.metadata = {
-        ...result.metadata,
+      logger.info('✅ Optimized extraction complete', {
         extractionId,
-        strategy: 'fallback-pattern',
-        fallback: true,
-        optimized: true
+        finalContactCount: cleanedContacts.length,
+        aiUsed,
+        processingTime
+      });
+
+      return {
+        success: true,
+        contacts: cleanedContacts,
+        metadata: {
+          extractionId,
+          strategy: aiUsed ? 'hybrid' : 'pattern-only',
+          confidenceScore,
+          processingTime,
+          textLength: text.length
+        },
+        processingTime,
+        extractorsUsed: aiUsed ? ['patterns', 'gpt-4o-mini'] : ['patterns']
       };
 
-      return result;
-
     } catch (error) {
-      logger.error('❌ Fallback strategy also failed', { extractionId, error: error.message });
-      
+      logger.error('❌ Optimized extraction failed', {
+        extractionId,
+        error: error.message
+      });
+
       return {
         success: false,
-        error: 'All extraction methods failed',
         contacts: [],
         metadata: {
           extractionId,
-          strategy: 'failed',
-          fallback: true,
-          error: error.message
-        }
+          error: error.message,
+          processingTime: Date.now() - startTime
+        },
+        processingTime: Date.now() - startTime,
+        errors: [error.message]
       };
     }
   }
 
+
   /**
-   * Helper methods
+   * Calculate confidence score based on pattern results
    */
-  shouldUseOptimizedAI(fileBuffer, options) {
-    // Use optimized AI for large files or when explicitly requested
-    return fileBuffer.length > 1024 * 1024 || options.useOptimizedAI === true;
+  calculateConfidenceScore(patternResults) {
+    if (patternResults.contacts.length === 0) {
+      return 0;
+    }
+
+    const totalConfidence = patternResults.contacts.reduce((sum, contact) => {
+      return sum + (contact.confidence || 0.5);
+    }, 0);
+
+    return totalConfidence / patternResults.contacts.length;
   }
 
-  validateAndCleanContacts(contacts) {
-    if (!Array.isArray(contacts)) return [];
-
-    return contacts
-      .filter(contact => contact && typeof contact === 'object')
-      .map(contact => ({
-        id: contact.id || this.generateContactId(),
-        name: this.cleanString(contact.name),
-        email: this.cleanEmail(contact.email),
-        phone: this.cleanPhone(contact.phone),
-        role: this.cleanString(contact.role),
-        company: this.cleanString(contact.company),
-        department: this.cleanString(contact.department),
-        confidence: contact.confidence || 0.8,
-        metadata: contact.metadata || {}
-      }))
-      .filter(contact => contact.name || contact.email || contact.phone);
-  }
-
-  cleanString(str) {
-    if (!str || typeof str !== 'string') return '';
-    return str.trim().replace(/\s+/g, ' ');
-  }
-
-  cleanEmail(email) {
-    if (!email || typeof email !== 'string') return '';
-    const cleaned = email.trim().toLowerCase();
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(cleaned) ? cleaned : '';
-  }
-
-  cleanPhone(phone) {
-    if (!phone || typeof phone !== 'string') return '';
-    const cleaned = phone.replace(/\D/g, '');
-    return cleaned.length >= 10 ? phone.trim() : '';
-  }
-
-  calculateQualityMetrics(contacts, fileBuffer, mimeType) {
-    const totalContacts = contacts.length;
-    const contactsWithEmail = contacts.filter(c => c.email).length;
-    const contactsWithPhone = contacts.filter(c => c.phone).length;
-    const contactsWithRole = contacts.filter(c => c.role).length;
-    
-    return {
-      totalContacts,
-      completeness: {
-        email: totalContacts > 0 ? (contactsWithEmail / totalContacts) : 0,
-        phone: totalContacts > 0 ? (contactsWithPhone / totalContacts) : 0,
-        role: totalContacts > 0 ? (contactsWithRole / totalContacts) : 0
-      },
-      averageConfidence: totalContacts > 0 ? 
-        contacts.reduce((sum, c) => sum + (c.confidence || 0), 0) / totalContacts : 0,
-      qualityScore: this.calculateOverallQualityScore(contacts)
-    };
-  }
-
-  calculateOverallQualityScore(contacts) {
-    if (contacts.length === 0) return 0;
-
-    const scores = contacts.map(contact => {
-      let score = 0;
-      if (contact.name) score += 0.3;
-      if (contact.email) score += 0.3;
-      if (contact.phone) score += 0.2;
-      if (contact.role) score += 0.1;
-      if (contact.company) score += 0.1;
-      return score;
-    });
-
-    return scores.reduce((sum, score) => sum + score, 0) / scores.length;
-  }
-
-  async updateServiceHealth() {
-    // Update service health status
-    this.serviceHealth.ai.lastCheck = Date.now();
-    this.serviceHealth.textract.lastCheck = Date.now();
-    this.serviceHealth.pattern.lastCheck = Date.now();
-  }
-
-  async updatePerformanceMetrics(strategy, processingTime, result, extractionId) {
+  /**
+   * Enhance results with AI (only when needed)
+   */
+  async enhanceWithAI(text, existingContacts, extractionId) {
     try {
-      const stats = this.processingStats.get(strategy) || {
-        total: 0,
-        successful: 0,
-        totalTime: 0,
-        avgTime: 0,
-        avgContacts: 0,
-        totalContacts: 0
-      };
-
-      stats.total++;
-      if (result.success) stats.successful++;
-      stats.totalTime += processingTime;
-      stats.avgTime = stats.totalTime / stats.total;
+      // Create context-aware prompt
+      const prompt = this.buildOptimizedAIPrompt(text, existingContacts);
       
-      if (result.contacts) {
-        stats.totalContacts += result.contacts.length;
-        stats.avgContacts = stats.totalContacts / stats.total;
-      }
-
-      this.processingStats.set(strategy, stats);
-
-      // Log to database for learning
-      await this.prisma.extractionPerformance.create({
-        data: {
-          extractionId,
-          strategy,
-          processingTime,
-          success: result.success,
-          contactsFound: result.contacts?.length || 0,
-          qualityScore: result.metadata?.qualityMetrics?.qualityScore || 0
-        }
-      });
-
-    } catch (error) {
-      logger.warn('⚠️ Failed to update performance metrics', { error: error.message });
-    }
-  }
-
-  generateExtractionId() {
-    return `ext_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  generateContactId() {
-    return `contact_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  /**
-   * Get service health status
-   */
-  /**
-   * Extract text from document
-   */
-  async extractTextFromDocument(fileBuffer, mimeType) {
-    return await extractionService.extractTextFromDocument(fileBuffer, mimeType);
-  }
-
-  /**
-   * Post-process results with context awareness
-   */
-  async postProcessWithContext(result, strategy, documentAnalysis, adaptivePatterns, options, extractionId) {
-    try {
-      // Enhanced post-processing with context
-      const enhancedResult = await this.postProcessResults(result, strategy, options, extractionId);
-      
-      // Add context metadata
-      enhancedResult.metadata = {
-        ...enhancedResult.metadata,
-        documentAnalysis,
-        adaptivePatterns: adaptivePatterns.length,
-        contextAware: true,
-        extractionId
-      };
-
-      // Learn from this extraction
-      await this.learnFromExtraction(documentAnalysis, enhancedResult, options.fileName || 'unknown');
-
-      return enhancedResult;
-    } catch (error) {
-      logger.error('❌ Context-aware post-processing failed', { error: error.message });
-      return result;
-    }
-  }
-
-  /**
-   * Learn from extraction for continuous improvement
-   */
-  async learnFromExtraction(documentAnalysis, result, fileName) {
-    try {
-      // Update pattern performance
-      if (result.contacts && result.contacts.length > 0) {
-        for (const contact of result.contacts) {
-          if (contact.patternId) {
-            adaptivePatternService.updatePatternPerformance(contact.patternId, true);
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert contact extraction assistant. Return ONLY valid JSON in the specified format. Do not include markdown formatting or explanations.'
+          },
+          {
+            role: 'user',
+            content: prompt
           }
-        }
-      }
-
-      // Store learning data
-      const learningEntry = {
-        fileName,
-        documentAnalysis,
-        contactsFound: result.contacts?.length || 0,
-        successRate: result.contacts?.length > 0 ? 1 : 0,
-        timestamp: Date.now()
-      };
-
-      this.processingStats.set(fileName, learningEntry);
-
-      logger.info('🧠 Learning from extraction', {
-        fileName,
-        contactsFound: result.contacts?.length || 0,
-        documentStructure: documentAnalysis.documentStructure
+        ],
+        temperature: 0.1,
+        max_tokens: 2000 // Optimized for gpt-4o-mini
       });
+
+      const aiResult = JSON.parse(response.choices[0].message.content);
+      
+      logger.info('🤖 AI enhancement complete', {
+        extractionId,
+        contactsFound: aiResult.contacts?.length || 0
+      });
+
+      return aiResult.contacts || [];
+
     } catch (error) {
-      logger.warn('⚠️ Failed to learn from extraction', { error: error.message });
+      logger.error('❌ AI enhancement failed', {
+        extractionId,
+        error: error.message
+      });
+      return [];
     }
   }
 
-  getHealthStatus() {
-    return {
-      optimized: true,
-      strategyService: true,
-      performanceStats: Object.fromEntries(this.processingStats),
-      serviceHealth: this.serviceHealth
-    };
+  /**
+   * Build optimized AI prompt with context
+   */
+  buildOptimizedAIPrompt(text, existingContacts) {
+    const existingNames = existingContacts.map(c => c.name || c.role).filter(Boolean);
+    
+    return `Extract contact information from this production call sheet. Focus on finding contacts NOT already identified.
+
+EXISTING CONTACTS FOUND: ${existingNames.join(', ')}
+
+DOCUMENT TEXT:
+${text.substring(0, 8000)} // Limit text to optimize tokens
+
+Return JSON format:
+{
+  "contacts": [
+    {
+      "name": "Contact Name",
+      "role": "Role/Department", 
+      "email": "email@example.com",
+      "phone": "phone number"
+    }
+  ]
+}
+
+Focus on:
+- Names not in existing list
+- Complete contact info (name + phone/email)
+- Production crew, talent, vendors
+- Valid email addresses and phone numbers
+
+Return empty array if no new contacts found.`;
+  }
+
+  /**
+   * Merge pattern and AI results
+   */
+  mergeContacts(patternContacts, aiContacts) {
+    const merged = [...patternContacts];
+    
+    for (const aiContact of aiContacts) {
+      // Check if this contact already exists
+      const exists = merged.some(existing => 
+        this.areContactsSimilar(existing, aiContact)
+      );
+      
+      if (!exists && this.isValidContact(aiContact)) {
+        merged.push({
+          ...aiContact,
+          source: 'ai',
+          confidence: 0.7
+        });
+      }
+    }
+    
+    return merged;
+  }
+
+  /**
+   * Check if two contacts are similar
+   */
+  areContactsSimilar(contact1, contact2) {
+    const name1 = (contact1.name || '').toLowerCase();
+    const name2 = (contact2.name || '').toLowerCase();
+    const phone1 = (contact1.phone || '').replace(/\D/g, '');
+    const phone2 = (contact2.phone || '').replace(/\D/g, '');
+    const email1 = (contact1.email || '').toLowerCase();
+    const email2 = (contact2.email || '').toLowerCase();
+
+    // Same name
+    if (name1 && name2 && name1 === name2) return true;
+    
+    // Same phone
+    if (phone1 && phone2 && phone1 === phone2) return true;
+    
+    // Same email
+    if (email1 && email2 && email1 === email2) return true;
+
+    return false;
+  }
+
+  /**
+   * Remove duplicate contacts
+   */
+  removeDuplicateContacts(contacts) {
+    const unique = [];
+    
+    for (const contact of contacts) {
+      const exists = unique.some(existing => 
+        this.areContactsSimilar(existing, contact)
+      );
+      
+      if (!exists) {
+        unique.push(contact);
+      }
+    }
+    
+    return unique;
+  }
+
+  /**
+   * Clean and validate contacts
+   */
+  cleanAndValidateContacts(contacts) {
+    return contacts
+      .filter(contact => this.isValidContact(contact))
+      .map(contact => ({
+        id: `contact_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        name: contact.name || contact.role || 'Unknown',
+        role: contact.role || '',
+        email: contact.email || '',
+        phone: contact.phone || '',
+        department: contact.department || '',
+        notes: contact.notes || '',
+        source: contact.source || 'unknown',
+        confidence: contact.confidence || 0.5
+      }));
+  }
+
+  /**
+   * Validate contact data
+   */
+  isValidContact(contact) {
+    if (!contact) return false;
+    
+    const hasName = !!(contact.name || contact.role);
+    const hasContact = !!(contact.email || contact.phone);
+    
+    return hasName && hasContact;
+  }
+
+  /**
+   * Clean phone number
+   */
+  cleanPhoneNumber(phone) {
+    if (!phone) return '';
+    
+    // Remove all non-digits except + at start
+    let cleaned = phone.replace(/[^\d+]/g, '');
+    
+    // Add country code if missing (assume US)
+    if (cleaned.length === 10 && !cleaned.startsWith('+')) {
+      cleaned = '+1' + cleaned;
+    }
+    
+    return cleaned;
   }
 }
 
-module.exports = new OptimizedHybridExtractionService();
+module.exports = OptimizedHybridExtractionService;

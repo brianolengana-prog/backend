@@ -523,7 +523,7 @@ class EnterpriseContactExtractor {
           }
         ],
         temperature: 0.1,
-        max_tokens: 4000
+        max_tokens: 2500
       });
 
       const aiResult = JSON.parse(response.choices[0].message.content);
