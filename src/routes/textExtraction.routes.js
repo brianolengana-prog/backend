@@ -129,7 +129,7 @@ router.post('/process-text', async (req, res) => {
       rolePreferences: parsedRolePreferences,
       documentType,
       maxContacts: 1000,
-      maxProcessingTime: 15000, // 15 seconds timeout
+      maxProcessingTime: 60000, // 60 seconds timeout for AI processing
       ...parsedOptions
     };
 

@@ -27,6 +27,32 @@ class AIExtractionService {
   }
 
   /**
+   * Parse AI response that might contain markdown formatting
+   */
+  parseAIResponse(content) {
+    try {
+      // Remove markdown code blocks if present
+      let jsonContent = content.trim();
+      
+      // Remove ```json and ``` markers
+      if (jsonContent.startsWith('```json')) {
+        jsonContent = jsonContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      } else if (jsonContent.startsWith('```')) {
+        jsonContent = jsonContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      // Parse the cleaned JSON
+      return JSON.parse(jsonContent);
+    } catch (error) {
+      console.error('❌ Failed to parse AI response', { 
+        content: content.substring(0, 200),
+        error: error.message 
+      });
+      throw new Error(`Invalid AI response format: ${error.message}`);
+    }
+  }
+
+  /**
    * Main AI-powered extraction method
    */
   async extractContacts(fileBuffer, mimeType, fileName, options = {}) {
@@ -254,7 +280,7 @@ Provide analysis in JSON format:
         temperature: 0.1
       });
 
-      const analysis = JSON.parse(response.choices[0].message.content);
+      const analysis = this.parseAIResponse(response.choices[0].message.content);
       console.log('🧠 AI document analysis complete');
       return analysis;
     } catch (error) {
@@ -296,7 +322,7 @@ Provide analysis in JSON format:
           temperature: 0.1
         });
 
-        const chunkContacts = JSON.parse(response.choices[0].message.content);
+        const chunkContacts = this.parseAIResponse(response.choices[0].message.content);
         allContacts = allContacts.concat(chunkContacts);
         
         // Early exit if no contacts after first few chunks
@@ -398,7 +424,7 @@ Return validated contacts with improved confidence scores and any corrections ne
         temperature: 0.1
       });
 
-      const validatedContacts = JSON.parse(response.choices[0].message.content);
+      const validatedContacts = this.parseAIResponse(response.choices[0].message.content);
       console.log('✅ AI validation complete');
       return validatedContacts;
     } catch (error) {
@@ -445,7 +471,7 @@ Return enhanced contacts in the same JSON format:`;
         temperature: 0.1
       });
 
-      const enhancedContacts = JSON.parse(response.choices[0].message.content);
+      const enhancedContacts = this.parseAIResponse(response.choices[0].message.content);
       console.log('✨ AI enhancement complete');
       return enhancedContacts;
     } catch (error) {

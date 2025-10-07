@@ -381,6 +381,32 @@ class OptimizedAIUsageService {
   }
 
   /**
+   * Parse AI response that might contain markdown formatting
+   */
+  parseAIResponse(content) {
+    try {
+      // Remove markdown code blocks if present
+      let jsonContent = content.trim();
+      
+      // Remove ```json and ``` markers
+      if (jsonContent.startsWith('```json')) {
+        jsonContent = jsonContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      } else if (jsonContent.startsWith('```')) {
+        jsonContent = jsonContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      // Parse the cleaned JSON
+      return JSON.parse(jsonContent);
+    } catch (error) {
+      logger.error('❌ Failed to parse AI response', { 
+        content: content.substring(0, 200),
+        error: error.message 
+      });
+      throw new Error(`Invalid AI response format: ${error.message}`);
+    }
+  }
+
+  /**
    * Single optimized AI call for multiple tasks
    */
   async singleOptimizedCall(text, patternResults, aiTasks) {
@@ -415,7 +441,7 @@ Return JSON with enhanced contacts array and analysis results.`;
     });
 
     const tokensUsed = response.usage?.total_tokens || 0;
-    const aiResponse = JSON.parse(response.choices[0].message.content);
+    const aiResponse = this.parseAIResponse(response.choices[0].message.content);
     
     return {
       success: true,
@@ -497,7 +523,7 @@ Return cleaned contacts array.`;
     });
 
     const tokensUsed = response.usage?.total_tokens || 0;
-    const cleanedContacts = JSON.parse(response.choices[0].message.content);
+    const cleanedContacts = this.parseAIResponse(response.choices[0].message.content);
     
     return {
       success: true,
@@ -541,7 +567,7 @@ Return relationship insights and enhanced contacts.`;
     });
 
     const tokensUsed = response.usage?.total_tokens || 0;
-    const relationshipData = JSON.parse(response.choices[0].message.content);
+    const relationshipData = this.parseAIResponse(response.choices[0].message.content);
     
     return {
       success: true,
