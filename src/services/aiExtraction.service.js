@@ -41,13 +41,32 @@ class AIExtractionService {
         jsonContent = jsonContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
       }
       
+      // Handle incomplete JSON responses
+      if (jsonContent.includes('"contacts":') && !jsonContent.includes(']')) {
+        // Try to complete the JSON if it's cut off
+        if (jsonContent.endsWith(',')) {
+          jsonContent = jsonContent.slice(0, -1);
+        }
+        if (!jsonContent.endsWith('}') && !jsonContent.endsWith(']')) {
+          jsonContent += '}';
+        }
+      }
+      
       // Parse the cleaned JSON
       return JSON.parse(jsonContent);
     } catch (error) {
       console.error('❌ Failed to parse AI response', { 
         content: content.substring(0, 200),
-        error: error.message 
+        error: error.message,
+        fullContent: content
       });
+      
+      // Return fallback structure if parsing fails
+      if (content.includes('contacts') || content.includes('analysis')) {
+        console.warn('⚠️ Using fallback response structure');
+        return { contacts: [], analysis: {} };
+      }
+      
       throw new Error(`Invalid AI response format: ${error.message}`);
     }
   }

@@ -163,11 +163,10 @@ router.post('/process-text', async (req, res) => {
     });
 
     // Record usage
-    await usageService.recordAction(userId, 'upload', 1, {
-      contactsExtracted: result.contacts?.length || 0,
-      processingTime,
-      extractionMethod: result.metadata?.strategy || extractionMethod
-    });
+    await usageService.incrementUsage(userId, 'upload', 1);
+    if (result.contacts?.length > 0) {
+      await usageService.incrementUsage(userId, 'contact_extraction', result.contacts.length);
+    }
 
     // Transform result to match expected format
     const response = {

@@ -37,10 +37,10 @@ class OptimizedAIUsageService {
       
       // Token limits for different tasks
       tokenLimits: {
-        contextAnalysis: 400,
-        dataCleaning: 300,
-        relationshipInference: 500,
-        singleOptimized: 1000
+        contextAnalysis: 800,
+        dataCleaning: 1500,
+        relationshipInference: 1000,
+        singleOptimized: 2000
       },
       
       // Cache configuration
@@ -395,13 +395,32 @@ class OptimizedAIUsageService {
         jsonContent = jsonContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
       }
       
+      // Handle incomplete JSON responses
+      if (jsonContent.includes('"contacts":') && !jsonContent.includes(']')) {
+        // Try to complete the JSON if it's cut off
+        if (jsonContent.endsWith(',')) {
+          jsonContent = jsonContent.slice(0, -1);
+        }
+        if (!jsonContent.endsWith('}') && !jsonContent.endsWith(']')) {
+          jsonContent += '}';
+        }
+      }
+      
       // Parse the cleaned JSON
       return JSON.parse(jsonContent);
     } catch (error) {
       logger.error('❌ Failed to parse AI response', { 
         content: content.substring(0, 200),
-        error: error.message 
+        error: error.message,
+        fullContent: content
       });
+      
+      // Return fallback structure if parsing fails
+      if (content.includes('contacts') || content.includes('analysis')) {
+        logger.warn('⚠️ Using fallback response structure');
+        return { contacts: [], analysis: {} };
+      }
+      
       throw new Error(`Invalid AI response format: ${error.message}`);
     }
   }
