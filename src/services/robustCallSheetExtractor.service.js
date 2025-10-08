@@ -31,45 +31,45 @@ class RobustCallSheetExtractor {
     return {
       // High-confidence structured patterns (most common)
       structured: [
-        // Pattern 1: ROLE: Name / Phone (most common)
+        // Pattern 1: ROLE: Name / Phone (most common) - CASE INSENSITIVE
         {
           name: 'role_name_phone_slash',
-          regex: /^([A-Z][A-Z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\/\s*(\(?[\d\s\-\(\)\.]{8,}\)?)\s*$/gm,
+          regex: /^([A-Za-z][A-Za-z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\/\s*(\(?[\d\s\-\(\)\.]{8,}\)?)\s*$/gmi,
           groups: ['role', 'name', 'phone'],
           confidence: 0.95
         },
-        // Pattern 1b: ROLE: Name / Phone (more flexible)
+        // Pattern 1b: ROLE: Name / Phone (more flexible) - CASE INSENSITIVE
         {
           name: 'role_name_phone_slash_flexible',
-          regex: /([A-Z][A-Z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\/\s*(\(?[\d\s\-\(\)\.]{8,}\)?)/gm,
+          regex: /([A-Za-z][A-Za-z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\/\s*(\(?[\d\s\-\(\)\.]{8,}\)?)/gmi,
           groups: ['role', 'name', 'phone'],
           confidence: 0.9
         },
-        // Pattern 2: ROLE: Name / Email / Phone
+        // Pattern 2: ROLE: Name / Email / Phone - CASE INSENSITIVE
         {
           name: 'role_name_email_phone_slash',
-          regex: /^([A-Z][A-Z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\/\s*([^\s]+@[^\s]+)\s*\/\s*(\(?[\d\s\-\(\)\.]{8,}\)?)\s*$/gm,
+          regex: /^([A-Za-z][A-Za-z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\/\s*([^\s]+@[^\s]+)\s*\/\s*(\(?[\d\s\-\(\)\.]{8,}\)?)\s*$/gmi,
           groups: ['role', 'name', 'email', 'phone'],
           confidence: 0.95
         },
-        // Pattern 2b: ROLE: Name / Email / Phone (flexible)
+        // Pattern 2b: ROLE: Name / Email / Phone (flexible) - CASE INSENSITIVE
         {
           name: 'role_name_email_phone_slash_flexible',
-          regex: /([A-Z][A-Z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\/\s*([^\s]+@[^\s]+)\s*\/\s*(\(?[\d\s\-\(\)\.]{8,}\)?)/gm,
+          regex: /([A-Za-z][A-Za-z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\/\s*([^\s]+@[^\s]+)\s*\/\s*(\(?[\d\s\-\(\)\.]{8,}\)?)/gmi,
           groups: ['role', 'name', 'email', 'phone'],
           confidence: 0.9
         },
-        // Pattern 3: ROLE: Name / Agency / Phone (talent)
+        // Pattern 3: ROLE: Name / Agency / Phone (talent) - CASE INSENSITIVE
         {
           name: 'role_name_agency_phone',
-          regex: /^([A-Z][A-Z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\/\s*([A-Za-z\s\-'\.&]+)\s*\/\s*(\(?[\d\s\-\(\)\.]{8,}\)?)\s*$/gm,
+          regex: /^([A-Za-z][A-Za-z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\/\s*([A-Za-z\s\-'\.&]+)\s*\/\s*(\(?[\d\s\-\(\)\.]{8,}\)?)\s*$/gmi,
           groups: ['role', 'name', 'agency', 'phone'],
           confidence: 0.9
         },
-        // Pattern 4: ROLE: Name - Phone
+        // Pattern 4: ROLE: Name - Phone - CASE INSENSITIVE
         {
           name: 'role_name_phone_dash',
-          regex: /^([A-Z][A-Z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*-\s*(\(?[\d\s\-\(\)\.]{8,}\)?)\s*$/gm,
+          regex: /^([A-Za-z][A-Za-z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*-\s*(\(?[\d\s\-\(\)\.]{8,}\)?)\s*$/gmi,
           groups: ['role', 'name', 'phone'],
           confidence: 0.9
         },

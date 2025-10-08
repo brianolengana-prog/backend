@@ -50,8 +50,18 @@ class OptimizedHybridExtractionService {
         textLength: text.length
       });
 
+      // Step 0: Normalize text to fix PDF extraction artifacts
+      const normalizedText = this.normalizeExtractedText(text);
+      
+      logger.info('🧹 Text normalized', {
+        extractionId,
+        originalLength: text.length,
+        normalizedLength: normalizedText.length,
+        fixedSpacing: text.length !== normalizedText.length
+      });
+
       // Step 1: Robust pattern-based extraction (comprehensive call sheet patterns)
-      const patternResults = await this.robustExtractor.extractContacts(text, {
+      const patternResults = await this.robustExtractor.extractContacts(normalizedText, {
         extractionId,
         ...options
       });
@@ -128,6 +138,54 @@ class OptimizedHybridExtractionService {
     }
   }
 
+
+  /**
+   * Normalize extracted text to fix PDF extraction artifacts
+   * Fixes common issues from client-side pdf.js extraction
+   */
+  normalizeExtractedText(text) {
+    let normalized = text;
+    
+    // Fix excessive spacing between letters (e.g., "p hotog ra phe r" → "photographer")
+    // Match pattern: single letter + space + single letter
+    normalized = normalized.replace(/\b([a-z])\s+([a-z])\s+([a-z])/gi, (match, l1, l2, l3) => {
+      // Check if this looks like a spaced-out word
+      const rest = match.split(/\s+/);
+      if (rest.every(part => part.length === 1)) {
+        return match.replace(/\s+/g, '');
+      }
+      return match;
+    });
+    
+    // More aggressive: Fix any single letters with spaces (common in PDF OCR)
+    // "a s s i s t a n t" → "assistant"
+    normalized = normalized.replace(/\b([a-z])\s+([a-z])\b/gi, '$1$2');
+    
+    // Fix specific known role keywords with spacing issues
+    const roleKeywords = [
+      'photographer', 'videographer', 'assistant', 'digitech',
+      'production', 'casting', 'director', 'stylist', 'makeup',
+      'model', 'driver', 'manager', 'designer', 'creative',
+      'social', 'chief', 'junior'
+    ];
+    
+    roleKeywords.forEach(keyword => {
+      // Match keyword with spaces between EVERY letter
+      const spacedPattern = keyword.split('').join('\\s*');
+      const regex = new RegExp(spacedPattern, 'gi');
+      normalized = normalized.replace(regex, keyword);
+    });
+    
+    // Fix common name spacing issues
+    // "ma r iolga" → "mariolga"
+    normalized = normalized.replace(/\b([a-z])\s+([a-z])\s+([a-z])\s+([a-z])\s+([a-z])\s+([a-z])\s+([a-z])\b/gi, '$1$2$3$4$5$6$7');
+    normalized = normalized.replace(/\b([a-z])\s+([a-z])\s+([a-z])\s+([a-z])\s+([a-z])\s+([a-z])\b/gi, '$1$2$3$4$5$6');
+    normalized = normalized.replace(/\b([a-z])\s+([a-z])\s+([a-z])\s+([a-z])\s+([a-z])\b/gi, '$1$2$3$4$5');
+    normalized = normalized.replace(/\b([a-z])\s+([a-z])\s+([a-z])\s+([a-z])\b/gi, '$1$2$3$4');
+    normalized = normalized.replace(/\b([a-z])\s+([a-z])\s+([a-z])\b/gi, '$1$2$3');
+    
+    return normalized;
+  }
 
   /**
    * Calculate confidence score based on pattern results
@@ -291,10 +349,11 @@ Return empty array if no new contacts found.`;
    */
   cleanAndValidateContacts(contacts) {
     return contacts
-      .filter(contact => this.isValidContact(contact))
+      .map(contact => this.cleanContact(contact))
+      .filter(contact => contact !== null && this.isValidContact(contact))
       .map(contact => ({
         id: `contact_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name: contact.name || contact.role || 'Unknown',
+        name: contact.name || 'Unknown',
         role: contact.role || '',
         email: contact.email || '',
         phone: contact.phone || '',
@@ -306,15 +365,178 @@ Return empty array if no new contacts found.`;
   }
 
   /**
-   * Validate contact data
+   * Clean individual contact fields
+   */
+  cleanContact(contact) {
+    if (!contact || typeof contact !== 'object') {
+      return null;
+    }
+
+    const cleaned = {
+      ...contact,
+      name: this.cleanName(contact.name),
+      email: this.cleanEmail(contact.email),
+      phone: this.cleanPhone(contact.phone),
+      role: this.cleanRole(contact.role),
+      company: this.cleanCompany(contact.company)
+    };
+
+    return cleaned;
+  }
+
+  /**
+   * Clean name field
+   */
+  cleanName(name) {
+    if (!name || typeof name !== 'string') return '';
+    
+    let cleaned = name.trim();
+    
+    // Remove excessive spacing (like "Ma r iolga" -> "Mariolga")
+    cleaned = cleaned.replace(/\s+/g, ' ');
+    
+    // Remove role prefixes if duplicated
+    const roleWords = ['Producer', 'Photographer', 'Director', 'Assistant', 'Makeup', 'Stylist', 'MUA', 'HMUA', 'HUA'];
+    roleWords.forEach(role => {
+      const regex = new RegExp(`^${role}\\s*:\\s*`, 'i');
+      cleaned = cleaned.replace(regex, '');
+    });
+    
+    // Remove common non-name artifacts
+    cleaned = cleaned.replace(/^(com|gmail\.com|page|line)\s+/i, '');
+    
+    // Title case
+    if (cleaned.length > 0 && cleaned.length < 80) {
+      cleaned = cleaned.replace(/\b\w/g, l => l.toUpperCase());
+    }
+    
+    return cleaned.trim();
+  }
+
+  /**
+   * Clean email field with STRICT validation
+   */
+  cleanEmail(email) {
+    if (!email || typeof email !== 'string') return '';
+    
+    const cleaned = email.trim().toLowerCase();
+    
+    // STRICT: Email must be < 100 characters (prevents text dumps)
+    if (cleaned.length > 100) {
+      logger.warn('⚠️ Rejected email (too long):', cleaned.substring(0, 50) + '...');
+      return '';
+    }
+    
+    // STRICT: Basic email validation
+    const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+    if (!emailRegex.test(cleaned)) {
+      // Not a valid email format
+      return '';
+    }
+    
+    return cleaned;
+  }
+
+  /**
+   * Clean role field
+   */
+  cleanRole(role) {
+    if (!role || typeof role !== 'string') return '';
+    
+    let cleaned = role.trim().toUpperCase();
+    
+    // STRICT: Reject roles that look like addresses or other non-role text
+    if (cleaned.length > 100) {
+      logger.warn('⚠️ Rejected role (too long):', cleaned.substring(0, 50) + '...');
+      return '';
+    }
+    
+    // Reject if it contains address-like patterns
+    if (cleaned.includes('STREET') || cleaned.includes('AVENUE') || cleaned.includes('AVE,') || 
+        cleaned.includes('BROOKLYN') || cleaned.includes('NY ') || /\d{5}/.test(cleaned)) {
+      logger.warn('⚠️ Rejected role (looks like address):', cleaned.substring(0, 50));
+      return '';
+    }
+    
+    // Normalize common variations
+    cleaned = cleaned
+      .replace(/MAKE UP ARTIST/g, 'MUA')
+      .replace(/MAKEUP ARTIST/g, 'MUA')
+      .replace(/HAIR MAKEUP/g, 'HMUA')
+      .replace(/PHOTO GRAPHER/g, 'PHOTOGRAPHER');
+    
+    return cleaned;
+  }
+
+  /**
+   * Clean company field
+   */
+  cleanCompany(company) {
+    if (!company || typeof company !== 'string') return '';
+    
+    return company.trim()
+      .replace(/\s+/g, ' ')
+      .substring(0, 100) // Limit length
+      .trim();
+  }
+
+  /**
+   * Validate contact data with STRICT rules
    */
   isValidContact(contact) {
-    if (!contact) return false;
+    if (!contact || typeof contact !== 'object') {
+      return false;
+    }
+
+    // Must have a name
+    const name = contact.name || '';
+    if (name.length < 2) {
+      return false;
+    }
+
+    // Reject single-word names unless they have strong contact info
+    const nameParts = name.trim().split(/\s+/);
+    if (nameParts.length === 1 && nameParts[0].length < 4) {
+      // Single short name (like "Tray") - only accept if has valid email or phone
+      const hasValidEmail = contact.email && contact.email.includes('@');
+      const hasValidPhone = contact.phone && contact.phone.length >= 10;
+      
+      if (!hasValidEmail && !hasValidPhone) {
+        logger.warn('⚠️ Rejected single-word name without contact info:', name);
+        return false;
+      }
+    }
+
+    // STRICT: Reject if email looks invalid (common for garbage extraction)
+    if (contact.email && contact.email.length > 0) {
+      // If email doesn't contain @, it's not an email
+      if (!contact.email.includes('@')) {
+        logger.warn('⚠️ Rejected contact with invalid email:', {
+          name: contact.name,
+          email: contact.email.substring(0, 50)
+        });
+        return false;
+      }
+    }
+
+    // STRICT: Reject if role looks like an address or long text
+    if (contact.role && contact.role.length > 80) {
+      logger.warn('⚠️ Rejected contact with suspicious role:', {
+        name: contact.name,
+        role: contact.role.substring(0, 50)
+      });
+      return false;
+    }
+
+    // Must have at least email OR phone
+    const hasEmail = contact.email && contact.email.length > 0;
+    const hasPhone = contact.phone && contact.phone.length > 0;
     
-    const hasName = !!(contact.name || contact.role);
-    const hasContact = !!(contact.email || contact.phone);
-    
-    return hasName && hasContact;
+    if (!hasEmail && !hasPhone) {
+      return false;
+    }
+
+    return true;
   }
 
   /**
