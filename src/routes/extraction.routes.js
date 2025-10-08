@@ -8,18 +8,31 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
 const { authenticateToken } = require('../middleware/auth');
+
+// ============================================================
+// OPTIMIZATION: Use clean, modular extraction architecture
+// Replaced 8 messy services with single orchestrator
+// ============================================================
 const extractionService = require('../services/extraction-refactored.service');
-const aiExtractionService = require('../services/aiExtraction.service');
+const ExtractionMigrationService = require('../services/enterprise/ExtractionMigrationService');
+const usageService = require('../services/usage.service');
+
+// File hash utility for deduplication
+const { calculateFileHash } = require('../utils/fileHash');
+
+// Comprehensive error handling
+const { 
+  ExtractionError, 
+  ERROR_CODES, 
+  formatErrorResponse, 
+  logError, 
+  asyncHandler 
+} = require('../utils/errorHandler');
+
+// Legacy services (kept for gradual migration)
 const optimizedAIExtractionService = require('../services/optimizedAIExtraction.service');
 const awsTextractService = require('../services/awsTextract.service');
-const hybridExtractionService = require('../services/hybridExtraction.service');
-const adaptiveExtractionService = require('../services/adaptiveExtraction.service');
-const usageService = require('../services/usage.service');
-// Enterprise extraction integration
-const ExtractionMigrationService = require('../services/enterprise/ExtractionMigrationService');
-const enterpriseConfig = require('../config/enterprise.config');
-// Queue removed: we process synchronously for reliability
-// const queueService = require('../services/queue.service');
+
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
@@ -43,7 +56,7 @@ const ensureProfileForUser = async (userId) => {
 
 const router = express.Router();
 
-// Initialize enterprise migration service (singleton instance)
+// Initialize enterprise migration service (already a singleton instance)
 const migrationService = ExtractionMigrationService;
 
 // All extraction routes require authentication
@@ -93,45 +106,104 @@ ensureUploadDir();
  * POST /api/extraction/upload
  * Upload and extract contacts from call sheet file (Async Queue-based)
  */
-router.post('/upload', upload.single('file'), async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { rolePreferences, options, extractionMethod = 'hybrid', priority = 'normal' } = req.body;
-    
-    // Parse options if it's a string
-    let parsedOptions = {};
-    if (options) {
-      try {
-        parsedOptions = typeof options === 'string' ? JSON.parse(options) : options;
-        console.log('📁 Parsed options:', parsedOptions);
-      } catch (error) {
-        console.warn('⚠️ Failed to parse options, using empty object:', error.message);
-        parsedOptions = {};
-      }
-    } else {
-      console.log('📁 No options provided, using empty object');
+router.post('/upload', upload.single('file'), asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { rolePreferences, options, extractionMethod = 'hybrid', priority = 'normal' } = req.body;
+  
+  // Validate file upload
+  if (!req.file) {
+    throw new ExtractionError(
+      'No file uploaded',
+      ERROR_CODES.NO_FILE_UPLOADED,
+      400
+    );
+  }
+  
+  // Parse options if it's a string
+  let parsedOptions = {};
+  if (options) {
+    try {
+      parsedOptions = typeof options === 'string' ? JSON.parse(options) : options;
+      console.log('📁 Parsed options:', parsedOptions);
+    } catch (error) {
+      console.warn('⚠️ Failed to parse options, using empty object:', error.message);
+      parsedOptions = {};
     }
-    
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: 'No file uploaded'
-      });
-    }
+  } else {
+    console.log('📁 No options provided, using empty object');
+  }
 
     console.log('📁 File upload received:', req.file.originalname);
     console.log('📁 File type:', req.file.mimetype);
     console.log('📁 File size:', req.file.size);
     console.log('📁 Options received:', options, 'Type:', typeof options);
 
+    // ============================================================
+    // OPTIMIZATION: File Deduplication
+    // Calculate file hash and check for recent identical uploads
+    // ============================================================
+    const fileHash = calculateFileHash(req.file.buffer);
+    const fileSize = req.file.size;
+    
+    console.log('🔍 File hash:', fileHash);
+    console.log('🔍 Checking for duplicate uploads...');
+    
+    // Check for existing extraction within last 24 hours
+    const recentExtraction = await prisma.job.findFirst({
+      where: {
+        userId,
+        fileHash,
+        status: 'COMPLETED',
+        createdAt: {
+          gte: new Date(Date.now() - 24 * 60 * 60 * 1000)  // Last 24 hours
+        }
+      },
+      include: {
+        contacts: {
+          orderBy: { createdAt: 'asc' }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    if (recentExtraction) {
+      console.log('✅ Found cached extraction from', recentExtraction.createdAt);
+      console.log('✅ Serving', recentExtraction.contacts.length, 'contacts from cache');
+      
+      // Increment usage (still counts as an upload)
+      await usageService.incrementUsage(userId, 'upload', 1);
+      
+      return res.json({
+        success: true,
+        jobId: recentExtraction.id,
+        status: 'completed',
+        result: {
+          contacts: recentExtraction.contacts,
+          metadata: {
+            fromCache: true,
+            cacheAge: Date.now() - recentExtraction.createdAt.getTime(),
+            originalFileName: recentExtraction.fileName,
+            strategy: 'cached'
+          }
+        },
+        cached: true,
+        cacheAge: Date.now() - recentExtraction.createdAt.getTime()
+      });
+    }
+    
+    console.log('📄 No recent extraction found, processing file...');
+
     // Check usage limits before processing
     const canProcess = await usageService.canPerformAction(userId, 'upload', 1);
     if (!canProcess.canPerform) {
-      return res.status(403).json({ 
-        success: false, 
-        error: canProcess.reason,
-        requiresUpgrade: true
-      });
+      throw new ExtractionError(
+        canProcess.reason || 'Upload limit exceeded',
+        ERROR_CODES.USAGE_LIMIT_EXCEEDED,
+        403,
+        { requiresUpgrade: true }
+      );
     }
 
     // Determine file type from mimetype
@@ -249,28 +321,26 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     const result = await Promise.race([extractionPromise, timeoutPromise]);
 
     if (!result.success) {
-      // Provide specific error messages based on failure type
-      let errorMessage = 'Extraction failed';
-      let errorCode = 'EXTRACTION_FAILED';
-      
-      if (result.error) {
-        if (result.error.includes('timeout')) {
-          errorMessage = 'File is too large or complex. Please try a smaller file or contact support.';
-          errorCode = 'EXTRACTION_TIMEOUT';
-        } else if (result.error.includes('insufficient text')) {
-          errorMessage = 'Unable to read text from this file. Please ensure it\'s a valid document.';
-          errorCode = 'INVALID_DOCUMENT';
-        } else {
-          errorMessage = result.error;
-        }
+      // Classify and throw appropriate error
+      if (result.error && result.error.includes('timeout')) {
+        throw new ExtractionError(
+          'File is too large or complex to process',
+          ERROR_CODES.EXTRACTION_TIMEOUT,
+          408
+        );
+      } else if (result.error && result.error.includes('insufficient text')) {
+        throw new ExtractionError(
+          'Unable to read text from this file',
+          ERROR_CODES.INSUFFICIENT_TEXT,
+          422
+        );
+      } else {
+        throw new ExtractionError(
+          result.error || 'Contact extraction failed',
+          ERROR_CODES.CONTACT_EXTRACTION_FAILED,
+          422
+        );
       }
-
-      return res.status(400).json({ 
-        success: false, 
-        error: errorMessage,
-        errorCode: errorCode,
-        requiresSupport: errorCode === 'EXTRACTION_TIMEOUT'
-      });
     }
 
     console.log(`✅ Extraction completed: ${result.contacts?.length || 0} contacts found`);
@@ -291,6 +361,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             userId,
             title: `Extraction - ${req.file.originalname}`,
             fileName: req.file.originalname,
+            fileHash: fileHash,  // Save hash for deduplication
+            fileSize: fileSize,  // Save size for analytics
             status: 'COMPLETED'
           }
         });
@@ -334,15 +406,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     });
   }
 
-  } catch (error) {
-    console.error('❌ File upload error:', error);
-    
-    res.status(500).json({
-      success: false,
-      error: 'File upload failed'
-    });
-  }
-});
+}));
 
 /**
  * POST /api/extraction/extract
@@ -1122,5 +1186,12 @@ router.post('/force-migration', async (req, res) => {
     });
   }
 });
+
+// ============================================================
+// ERROR HANDLING MIDDLEWARE
+// Must be last to catch all errors from routes above
+// ============================================================
+const { errorMiddleware } = require('../utils/errorHandler');
+router.use(errorMiddleware);
 
 module.exports = router;

@@ -8,7 +8,7 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  directUrl = env("DIRECT_URL") // Optional: For Supabase connection pooling
 }
 
 // ========================================
@@ -67,6 +67,8 @@ model Job {
   title            String
   fileName         String?  @map("file_name")
   fileUrl          String?  @map("file_url")
+  fileHash         String?  @map("file_hash") @db.VarChar(64)  // SHA-256 hash for deduplication
+  fileSize         Int?     @map("file_size")  // File size in bytes
   status           JobStatus @default(PROCESSING)
   processedContacts Json?   @map("processed_contacts")
   productionId     String?  @map("production_id") @db.Uuid
@@ -77,6 +79,11 @@ model Job {
   profile    Profile     @relation(fields: [userId], references: [userId], onDelete: Cascade)
   contacts   Contact[]
   production Production? @relation(fields: [productionId], references: [id], onDelete: SetNull)
+
+  // Indexes for performance
+  @@index([userId, fileHash])
+  @@index([userId, status, createdAt(sort: Desc)])
+  @@index([fileHash, createdAt(sort: Desc)])
 
   @@map("jobs")
 }
