@@ -10,6 +10,10 @@ const router = express.Router();
 const migrationService = require('../services/enterprise/ExtractionMigrationService');
 const usageService = require('../services/usage.service');
 const winston = require('winston');
+const { PrismaClient } = require('@prisma/client');
+const extractionService = require('../services/extraction-refactored.service');
+
+const prisma = new PrismaClient();
 
 // Configure logger
 const logger = winston.createLogger({
@@ -22,6 +26,20 @@ const logger = winston.createLogger({
     new winston.transports.Console()
   ]
 });
+
+// Ensure a Profile row exists for a given userId (Job.userId references Profile.userId)
+const ensureProfileForUser = async (userId) => {
+  try {
+    await prisma.profile.upsert({
+      where: { userId },
+      update: {},
+      create: { userId }
+    });
+  } catch (e) {
+    logger.error('❌ Failed to ensure profile for user:', { userId, error: e.message });
+    throw e;
+  }
+};
 
 /**
  * POST /api/extraction/process-text
@@ -168,9 +186,63 @@ router.post('/process-text', async (req, res) => {
       await usageService.incrementUsage(userId, 'contact_extraction', result.contacts.length);
     }
 
+    // ⭐ FIX: Save contacts to database
+    let jobId = null;
+    if (result.contacts && result.contacts.length > 0) {
+      try {
+        logger.info('💾 Saving contacts to database', {
+          userId,
+          contactCount: result.contacts.length,
+          fileName,
+          extractionId: extractionOptions.extractionId
+        });
+
+        // Ensure profile exists
+        await ensureProfileForUser(userId);
+        
+        // Create job record
+        const job = await prisma.job.create({
+          data: {
+            userId,
+            title: `Text Extraction - ${fileName}`,
+            fileName: fileName,
+            status: 'COMPLETED'
+          }
+        });
+        
+        jobId = job.id;
+        
+        // Save contacts using the extraction service
+        await extractionService.saveContacts(result.contacts, userId, jobId);
+        
+        logger.info('✅ Contacts saved successfully', {
+          userId,
+          jobId,
+          contactsSaved: result.contacts.length
+        });
+        
+      } catch (dbError) {
+        logger.error('❌ Failed to save contacts to database', {
+          userId,
+          fileName,
+          error: dbError.message,
+          stack: dbError.stack
+        });
+        // Don't fail the request, just log the error
+        // Contacts are still returned in response for immediate use
+      }
+    } else {
+      logger.warn('⚠️ No contacts to save', {
+        userId,
+        fileName,
+        contactCount: result.contacts?.length || 0
+      });
+    }
+
     // Transform result to match expected format
     const response = {
       success: result.success !== false,
+      jobId: jobId,  // ⭐ ADD jobId to response
       contacts: result.contacts || [],
       metadata: {
         ...result.metadata,
