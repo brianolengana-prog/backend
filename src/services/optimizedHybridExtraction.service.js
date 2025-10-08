@@ -376,7 +376,7 @@ Return empty array if no new contacts found.`;
       ...contact,
       name: this.cleanName(contact.name),
       email: this.cleanEmail(contact.email),
-      phone: this.cleanPhone(contact.phone),
+      phone: this.cleanPhoneNumber(contact.phone),  // ⭐ FIX: Use existing method name
       role: this.cleanRole(contact.role),
       company: this.cleanCompany(contact.company)
     };
