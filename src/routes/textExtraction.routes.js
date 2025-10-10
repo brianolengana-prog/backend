@@ -9,6 +9,10 @@ const express = require('express');
 const router = express.Router();
 const migrationService = require('../services/enterprise/ExtractionMigrationService');
 const usageService = require('../services/usage.service');
+const extractionPersistence = require('../services/database/ExtractionPersistence.service');
+const concurrencyLimiter = require('../middleware/ConcurrencyLimiter');
+const { smartRateLimit } = require('../middleware/RateLimiter');
+const performanceMonitor = require('../utils/PerformanceMonitor');
 const winston = require('winston');
 const { PrismaClient } = require('@prisma/client');
 const extractionService = require('../services/extraction-refactored.service');
@@ -45,7 +49,15 @@ const ensureProfileForUser = async (userId) => {
  * POST /api/extraction/process-text
  * Process extracted text for contact extraction
  */
-router.post('/process-text', async (req, res) => {
+// ⭐ TIER 1 FIX #4: Rate limiting prevents abuse
+router.post('/process-text', smartRateLimit('textExtraction'), async (req, res) => {
+  // ⭐ TIER 1 FIX #5: Performance timing and logging
+  const operationId = `text_extraction_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  const perfStop = performanceMonitor.start(operationId, {
+    userId: req.user?.id,
+    operationType: 'text_extraction'
+  });
+  
   const startTime = Date.now();
   
   try {
@@ -158,18 +170,30 @@ router.post('/process-text', async (req, res) => {
       rolePreferences: parsedRolePreferences.length
     });
 
-    // Perform contact extraction using migration service
-    const extractionPromise = migrationService.extractContacts(text, extractionOptions);
-    
-    // Set timeout for extraction
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => {
-        reject(new Error('Extraction timeout - processing took too long'));
-      }, extractionOptions.maxProcessingTime);
-    });
+    // ⭐ TIER 1 FIX #3: Concurrency limits
+    // Prevents server overload from too many simultaneous extractions
+    const result = await concurrencyLimiter.execute(
+      userId,
+      async () => {
+        // Perform contact extraction using migration service
+        const extractionPromise = migrationService.extractContacts(text, extractionOptions);
+        
+        // Set timeout for extraction
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error('Extraction timeout - processing took too long'));
+          }, extractionOptions.maxProcessingTime);
+        });
 
-    // Wait for extraction with timeout
-    const result = await Promise.race([extractionPromise, timeoutPromise]);
+        // Wait for extraction with timeout
+        return await Promise.race([extractionPromise, timeoutPromise]);
+      },
+      {
+        fileName,
+        textLength: text.length,
+        operation: 'text_extraction'
+      }
+    );
     
     const processingTime = Date.now() - startTime;
     
@@ -186,47 +210,48 @@ router.post('/process-text', async (req, res) => {
       await usageService.incrementUsage(userId, 'contact_extraction', result.contacts.length);
     }
 
-    // ⭐ FIX: Save contacts to database
+    // ⭐ TIER 1 FIX #1: Atomic database transaction
+    // Prevents data corruption from partial failures
     let jobId = null;
+    let savedContacts = [];
+    
     if (result.contacts && result.contacts.length > 0) {
       try {
-        logger.info('💾 Saving contacts to database', {
+        logger.info('💾 Saving contacts atomically', {
           userId,
           contactCount: result.contacts.length,
           fileName,
           extractionId: extractionOptions.extractionId
         });
 
-        // Ensure profile exists
-        await ensureProfileForUser(userId);
-        
-        // Create job record
-        const job = await prisma.job.create({
-          data: {
-            userId,
+        const saveResult = await extractionPersistence.saveExtractionWithTransaction({
+          userId,
+          fileData: {
+            originalname: fileName,
+            mimetype: 'text/plain',
+            size: text.length
+          },
+          extractionResult: result,
+          options: {
             title: `Text Extraction - ${fileName}`,
-            fileName: fileName,
-            status: 'COMPLETED'
+            startedAt: new Date()
           }
         });
         
-        jobId = job.id;
+        jobId = saveResult.job.id;
+        savedContacts = saveResult.contacts;
         
-        // Save contacts using the extraction service
-        await extractionService.saveContacts(result.contacts, userId, jobId);
-        
-        logger.info('✅ Contacts saved successfully', {
+        logger.info('✅ Extraction saved atomically', {
           userId,
           jobId,
-          contactsSaved: result.contacts.length
+          contactsSaved: savedContacts.length
         });
         
       } catch (dbError) {
-        logger.error('❌ Failed to save contacts to database', {
+        logger.error('❌ Atomic save failed - transaction rolled back', {
           userId,
           fileName,
-          error: dbError.message,
-          stack: dbError.stack
+          error: dbError.message
         });
         // Don't fail the request, just log the error
         // Contacts are still returned in response for immediate use
@@ -261,10 +286,23 @@ router.post('/process-text', async (req, res) => {
       documentType,
       productionType: 'text-extraction'
     };
+    
+    // Stop performance monitoring and log results
+    perfStop({
+      success: true,
+      contactCount: result.contacts?.length || 0,
+      jobId,
+      processingTime
+    });
 
     res.json(response);
 
   } catch (error) {
+    // Log performance even on error
+    perfStop({
+      success: false,
+      error: error.message
+    });
     const processingTime = Date.now() - startTime;
     
     logger.error('❌ Text processing error', {

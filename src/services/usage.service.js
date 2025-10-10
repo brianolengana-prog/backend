@@ -398,6 +398,19 @@ class UsageService {
    */
   async canPerformAction(userId, actionType, quantity = 1) {
     try {
+      // 🧪 TESTING MODE: Bypass upload limits when DISABLE_UPLOAD_LIMITS=true
+      if (process.env.DISABLE_UPLOAD_LIMITS === 'true') {
+        console.log('🧪 TESTING MODE: Upload limits disabled');
+        return {
+          canPerform: true,
+          reason: null,
+          currentUsage: 0,
+          limit: -1,
+          remaining: -1,
+          testingMode: true
+        };
+      }
+      
       console.log(`🔍 Checking if user ${userId} can perform ${actionType} (quantity: ${quantity})`);
       
       const usage = await this.getCurrentUsage(userId);
@@ -460,6 +473,12 @@ class UsageService {
    */
   async incrementUsage(userId, actionType, quantity = 1) {
     try {
+      // 🧪 TESTING MODE: Skip usage tracking when DISABLE_USAGE_TRACKING=true
+      if (process.env.DISABLE_USAGE_TRACKING === 'true') {
+        console.log('🧪 TESTING MODE: Usage tracking disabled');
+        return { success: true, testingMode: true };
+      }
+      
       console.log(`📈 Incrementing usage for user ${userId}: ${actionType} (quantity: ${quantity})`);
       
       switch (actionType) {

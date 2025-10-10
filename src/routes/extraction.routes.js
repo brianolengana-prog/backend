@@ -16,6 +16,10 @@ const { authenticateToken } = require('../middleware/auth');
 const extractionService = require('../services/extraction-refactored.service');
 const ExtractionMigrationService = require('../services/enterprise/ExtractionMigrationService');
 const usageService = require('../services/usage.service');
+const extractionPersistence = require('../services/database/ExtractionPersistence.service');
+const concurrencyLimiter = require('../middleware/ConcurrencyLimiter');
+const { smartRateLimit } = require('../middleware/RateLimiter');
+const performanceMonitor = require('../utils/PerformanceMonitor');
 
 // File hash utility for deduplication
 const { calculateFileHash } = require('../utils/fileHash');
@@ -106,7 +110,17 @@ ensureUploadDir();
  * POST /api/extraction/upload
  * Upload and extract contacts from call sheet file (Async Queue-based)
  */
-router.post('/upload', upload.single('file'), asyncHandler(async (req, res) => {
+// ⭐ TIER 1 FIX #4: Rate limiting prevents abuse
+router.post('/upload', smartRateLimit('fileUpload'), upload.single('file'), asyncHandler(async (req, res) => {
+  // ⭐ TIER 1 FIX #5: Performance timing and logging
+  const operationId = `extraction_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  const perfStop = performanceMonitor.start(operationId, {
+    userId: req.user.id,
+    fileName: req.file?.originalname,
+    fileSize: req.file?.size,
+    operationType: 'extraction'
+  });
+  
   const userId = req.user.id;
   const { rolePreferences, options, extractionMethod = 'hybrid', priority = 'normal' } = req.body;
   
@@ -301,24 +315,36 @@ router.post('/upload', upload.single('file'), asyncHandler(async (req, res) => {
     
     console.log('✅ Text extracted successfully, length:', extractedText.length);
 
-    // Use migration service to route to appropriate extraction system
-    const extractionPromise = migrationService.extractContacts(extractedText, {
+    // ⭐ TIER 1 FIX #3: Concurrency limits
+    // Prevents server overload from too many simultaneous extractions
+    const result = await concurrencyLimiter.execute(
       userId,
-      fileName: req.file.originalname,
-      mimeType: req.file.mimetype,
-      fileSize: req.file.size,
-      extractionId: `sync_${Date.now()}`,
-      ...parsedOptions,
-      maxContacts: 1000,
-      maxProcessingTime: 15000
-    });
+      async () => {
+        // Use migration service to route to appropriate extraction system
+        const extractionPromise = migrationService.extractContacts(extractedText, {
+          userId,
+          fileName: req.file.originalname,
+          mimeType: req.file.mimetype,
+          fileSize: req.file.size,
+          extractionId: `sync_${Date.now()}`,
+          ...parsedOptions,
+          maxContacts: 1000,
+          maxProcessingTime: 15000
+        });
 
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Extraction timeout - file too large or complex')), 30000);
-    });
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Extraction timeout - file too large or complex')), 30000);
+        });
 
-    console.log('🚀 Starting extraction with timeout protection...');
-    const result = await Promise.race([extractionPromise, timeoutPromise]);
+        console.log('🚀 Starting extraction with timeout protection...');
+        return await Promise.race([extractionPromise, timeoutPromise]);
+      },
+      {
+        fileName: req.file.originalname,
+        fileSize: req.file.size,
+        operation: 'file_extraction'
+      }
+    );
 
     if (!result.success) {
       // Classify and throw appropriate error
@@ -345,45 +371,81 @@ router.post('/upload', upload.single('file'), asyncHandler(async (req, res) => {
 
     console.log(`✅ Extraction completed: ${result.contacts?.length || 0} contacts found`);
 
-    await usageService.incrementUsage(userId, 'upload', 1);
-    if (result.contacts && result.contacts.length > 0) {
-      await usageService.incrementUsage(userId, 'contact_extraction', result.contacts.length);
-    }
-
-    // Persist contacts to DB if any were extracted
+    // ⭐ TIER 1 FIX #1: Atomic database transaction
+    // Prevents data corruption from partial failures
     let jobId = null;
+    let savedContacts = [];
+    
     if (result.contacts && result.contacts.length > 0) {
       try {
-        // Satisfy FK: jobs.user_id -> profiles.user_id
-        await ensureProfileForUser(userId);
-        const job = await prisma.job.create({
-          data: {
-            userId,
+        const saveResult = await extractionPersistence.saveExtractionWithTransaction({
+          userId,
+          fileData: {
+            originalname: req.file.originalname,
+            mimetype: req.file.mimetype,
+            size: req.file.size
+          },
+          extractionResult: result,
+          options: {
+            fileHash,
             title: `Extraction - ${req.file.originalname}`,
-            fileName: req.file.originalname,
-            fileHash: fileHash,  // Save hash for deduplication
-            fileSize: fileSize,  // Save size for analytics
-            status: 'COMPLETED'
+            startedAt: new Date()
           }
         });
-        jobId = job.id;
-        await extractionService.saveContacts(result.contacts, userId, jobId);
+        
+        jobId = saveResult.job.id;
+        savedContacts = saveResult.contacts;
+        
+        logger.info('✅ Extraction saved atomically', {
+          jobId,
+          contactCount: savedContacts.length
+        });
+        
       } catch (dbError) {
-        console.error('❌ Failed to persist contacts:', dbError);
+        logger.error('❌ Atomic save failed - transaction rolled back', {
+          error: dbError.message
+        });
+        
+        // Continue - extraction succeeded but save failed
+        // Return contacts to user even if DB save failed
       }
     }
+    
+    // Update usage AFTER successful transaction (outside transaction for performance)
+    await usageService.incrementUsage(userId, 'upload', 1);
+    if (savedContacts.length > 0) {
+      await usageService.incrementUsage(userId, 'contact_extraction', savedContacts.length);
+    }
 
+    // Stop performance monitoring and log results
+    const perfMetrics = perfStop({
+      success: true,
+      contactCount: result.contacts?.length || 0,
+      jobId
+    });
+    
     return res.json({
       success: true,
       jobId: jobId,
       status: 'completed',
       result: {
         contacts: result.contacts || [],
-        metadata: result.metadata || {},
+        metadata: {
+          ...result.metadata || {},
+          performanceMetrics: {
+            totalTime: perfMetrics?.durationMs,
+            stages: result.metadata?.stages
+          }
+        },
         processingTime: result.metadata?.processingTime || 0
       }
     });
   } catch (syncImmediateError) {
+    // Log performance even on error
+    perfStop({
+      success: false,
+      error: syncImmediateError.message
+    });
     console.error('❌ Synchronous processing failed:', syncImmediateError.message);
     
     // Provide user-friendly error messages
@@ -1194,4 +1256,5 @@ router.post('/force-migration', async (req, res) => {
 const { errorMiddleware } = require('../utils/errorHandler');
 router.use(errorMiddleware);
 
+module.exports = router;
 module.exports = router;
