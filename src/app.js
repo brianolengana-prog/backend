@@ -22,6 +22,7 @@ const usageRoutes = require('./routes/usage.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
 const upgradeWorkflowRoutes = require('./routes/upgradeWorkflow.routes');
 const contactsRoutes = require('./routes/contacts.routes');
+const supportRoutes = require('./routes/support.routes');
 
 const app = express();
 
@@ -104,6 +105,7 @@ app.use('/api/usage', usageRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/upgrade', upgradeWorkflowRoutes);
 app.use('/api/contacts', contactsRoutes);
+app.use('/api/support', supportRoutes); // Support email service
 
 app.use(notFound);
 app.use(errorHandler);
