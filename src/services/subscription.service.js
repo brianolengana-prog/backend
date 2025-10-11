@@ -451,7 +451,7 @@ class SubscriptionService {
   }
 
   /**
-   * Get available plans
+   * Get available plans (synced with Stripe)
    */
   async getPlans() {
     try {
@@ -459,14 +459,15 @@ class SubscriptionService {
       return result.plans || [];
     } catch (error) {
       console.error('Error getting plans:', error);
-      // Return default plans as fallback
+      // Return default plans as fallback (synced with Stripe live data)
       return [
         {
           id: 'free',
-          name: 'Free',
+          stripeProductId: 'prod_SzeaT10bDht5qR',
+          name: 'Free Trial',
           price: 0,
           interval: 'month',
-          stripePriceId: null,
+          stripePriceId: 'price_1S3fHn6NEzYIXIMoL50vVpQr',
           uploadsPerMonth: 1,
           maxContacts: 10,
           aiProcessingMinutes: 5,
@@ -474,14 +475,15 @@ class SubscriptionService {
           apiCallsPerMonth: 100,
           supportLevel: 'Basic',
           isPopular: false,
-          description: 'Perfect for trying out the service'
+          description: 'Try Callsheet Converter risk-free. Upload your first callsheet, extract key details, and export instantly—no commitment required.'
         },
         {
           id: 'starter',
-          name: 'Starter',
-          price: 2900, // $29.00 in cents
+          stripeProductId: 'prod_SzeZQiRTo7PuHd',
+          name: 'Starter Plan',
+          price: 2999, // $29.99 in cents (matches Stripe)
           interval: 'month',
-          stripePriceId: 'price_starter_monthly',
+          stripePriceId: 'price_1S3fG16NEzYIXIModekCNdYT',
           uploadsPerMonth: 50,
           maxContacts: 500,
           aiProcessingMinutes: 60,
@@ -489,14 +491,15 @@ class SubscriptionService {
           apiCallsPerMonth: 1000,
           supportLevel: 'Priority',
           isPopular: true,
-          description: 'Most popular for professionals'
+          description: 'Get started with effortless callsheet conversions. Upload a file, extract key contacts and roles instantly, and export to CSV or Excel.'
         },
         {
           id: 'professional',
-          name: 'Professional',
-          price: 9900, // $99.00 in cents
+          stripeProductId: 'prod_SzecxaOOVTnLdy',
+          name: 'Professional Plan',
+          price: 7999, // $79.99 in cents (UPDATED to match Stripe!)
           interval: 'month',
-          stripePriceId: 'price_professional_monthly',
+          stripePriceId: 'price_1S3fJQ6NEzYIXIMorYYqfFpW',
           uploadsPerMonth: 200,
           maxContacts: 2000,
           aiProcessingMinutes: 300,
@@ -504,7 +507,7 @@ class SubscriptionService {
           apiCallsPerMonth: 5000,
           supportLevel: '24/7',
           isPopular: false,
-          description: 'For growing teams and organizations'
+          description: 'Designed for growing teams and busy professionals, this plan offers unlimited conversions, advanced data extraction, and full CSV/Excel exports.'
         }
       ];
     }

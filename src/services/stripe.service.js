@@ -360,18 +360,63 @@ class StripeService {
 
       const plans = prices.data.map(price => {
         const product = price.product;
-        const uploadsPerMonth = parseInt(product.metadata?.uploadsPerMonth || '1');
-        const maxContacts = parseInt(product.metadata?.maxContacts || '10');
-        const aiProcessingMinutes = parseInt(product.metadata?.aiProcessingMinutes || '5');
-        const storageGB = parseInt(product.metadata?.storageGB || '1');
-        const apiCallsPerMonth = parseInt(product.metadata?.apiCallsPerMonth || '100');
-        const supportLevel = product.metadata?.supportLevel || 'Basic';
         
-        // Get features from Stripe product metadata
-        const features = this.getFeaturesFromMetadata(product.metadata);
+        // Map Stripe product IDs to our simple IDs
+        let simpleId = 'free';
+        let uploadsPerMonth = 1;
+        let maxContacts = 10;
+        let supportLevel = 'Basic';
+        let isPopular = false;
+        
+        if (product.id === 'prod_SzeaT10bDht5qR') {
+          // Free Trial
+          simpleId = 'free';
+          uploadsPerMonth = 1;
+          maxContacts = 10;
+          supportLevel = 'Basic';
+          isPopular = false;
+        } else if (product.id === 'prod_SzeZQiRTo7PuHd') {
+          // Starter Plan
+          simpleId = 'starter';
+          uploadsPerMonth = 50;
+          maxContacts = 500;
+          supportLevel = 'Priority';
+          isPopular = true;
+        } else if (product.id === 'prod_SzecxaOOVTnLdy') {
+          // Professional Plan
+          simpleId = 'professional';
+          uploadsPerMonth = 200;
+          maxContacts = 2000;
+          supportLevel = '24/7';
+          isPopular = false;
+        }
+        
+        // Set defaults based on plan (since Stripe metadata is not set)
+        let aiProcessingMinutes = 5;
+        let storageGB = 1;
+        let apiCallsPerMonth = 100;
+        
+        if (simpleId === 'starter') {
+          aiProcessingMinutes = 60;
+          storageGB = 10;
+          apiCallsPerMonth = 1000;
+        } else if (simpleId === 'professional') {
+          aiProcessingMinutes = 300;
+          storageGB = 50;
+          apiCallsPerMonth = 5000;
+        }
+        
+        // Override with Stripe metadata if available
+        if (product.metadata?.aiProcessingMinutes) aiProcessingMinutes = parseInt(product.metadata.aiProcessingMinutes);
+        if (product.metadata?.storageGB) storageGB = parseInt(product.metadata.storageGB);
+        if (product.metadata?.apiCallsPerMonth) apiCallsPerMonth = parseInt(product.metadata.apiCallsPerMonth);
+        
+        // Get features from Stripe product metadata or use defaults
+        const features = this.getFeaturesFromMetadata(product.metadata) || this.getDefaultFeatures(simpleId);
         
         return {
-          id: product.metadata?.planId || product.id,
+          id: simpleId,
+          stripeProductId: product.id,
           name: product.name,
           price: price.unit_amount,
           interval: price.recurring.interval,
@@ -382,7 +427,7 @@ class StripeService {
           storageGB,
           apiCallsPerMonth,
           supportLevel,
-          isPopular: product.metadata?.isPopular === 'true',
+          isPopular,
           description: product.description || 'Perfect for trying out the service',
           features: features
         };
@@ -455,10 +500,11 @@ class StripeService {
     const plans = [
       {
         id: 'free',
-        name: 'Free',
+        stripeProductId: 'prod_SzeaT10bDht5qR',
+        name: 'Free Trial',
         price: 0,
         interval: 'month',
-        stripePriceId: null,
+        stripePriceId: 'price_1S3fHn6NEzYIXIMoL50vVpQr',
         uploadsPerMonth: 1,
         maxContacts: 10,
         aiProcessingMinutes: 5,
@@ -466,14 +512,15 @@ class StripeService {
         apiCallsPerMonth: 100,
         supportLevel: 'Basic',
         isPopular: false,
-        description: 'Perfect for trying out the service'
+        description: 'Try Callsheet Converter risk-free. Upload your first callsheet, extract key details, and export instantly—no commitment required.'
       },
       {
         id: 'starter',
-        name: 'Starter',
-        price: 2900, // $29.00 in cents
+        stripeProductId: 'prod_SzeZQiRTo7PuHd',
+        name: 'Starter Plan',
+        price: 2999, // $29.99 in cents (matches Stripe)
         interval: 'month',
-        stripePriceId: 'price_starter_monthly',
+        stripePriceId: 'price_1S3fG16NEzYIXIModekCNdYT',
         uploadsPerMonth: 50,
         maxContacts: 500,
         aiProcessingMinutes: 60,
@@ -481,14 +528,15 @@ class StripeService {
         apiCallsPerMonth: 1000,
         supportLevel: 'Priority',
         isPopular: true,
-        description: 'Most popular for professionals'
+        description: 'Get started with effortless callsheet conversions. Upload a file, extract key contacts and roles instantly, and export to CSV or Excel.'
       },
       {
         id: 'professional',
-        name: 'Professional',
-        price: 9900, // $99.00 in cents
+        stripeProductId: 'prod_SzecxaOOVTnLdy',
+        name: 'Professional Plan',
+        price: 7999, // $79.99 in cents (matches Stripe)
         interval: 'month',
-        stripePriceId: 'price_professional_monthly',
+        stripePriceId: 'price_1S3fJQ6NEzYIXIMorYYqfFpW',
         uploadsPerMonth: 200,
         maxContacts: 2000,
         aiProcessingMinutes: 300,
@@ -496,7 +544,7 @@ class StripeService {
         apiCallsPerMonth: 5000,
         supportLevel: '24/7',
         isPopular: false,
-        description: 'For growing teams and organizations'
+        description: 'Designed for growing teams and busy professionals, this plan offers unlimited conversions, advanced data extraction, and full CSV/Excel exports.'
       }
     ];
 
@@ -508,53 +556,34 @@ class StripeService {
   }
 
   /**
-   * Get default features for fallback plans
+   * Get default features for fallback plans (synced with frontend config)
    */
   getDefaultFeatures(planId) {
     const defaultFeatures = {
       'free': [
         '1 upload per month',
-        'Up to 10 contacts per extraction',
-        '5 minutes of AI processing',
-        '1GB storage',
-        '100 API calls per month',
-        'Basic support',
+        'Up to 10 contacts',
+        'Basic extraction',
         'CSV export',
-        'Excel export',
-        'Free trial',
+        'Email support',
         'No credit card required',
-        'Real-time processing',
-        'Secure file handling'
       ],
       'starter': [
         '50 uploads per month',
-        'Up to 500 contacts per extraction',
-        '1 hour of AI processing',
-        '10GB storage',
-        '1,000 API calls per month',
-        'Priority support',
-        'CSV export',
-        'Excel export',
-        'AI-powered extraction',
-        'Dashboard access',
-        'Real-time processing',
+        'Up to 500 contacts',
+        'Advanced AI extraction',
+        'Multiple export formats',
+        'Priority processing',
+        'Email support',
         'Secure file handling'
       ],
       'professional': [
         '200 uploads per month',
-        'Up to 2,000 contacts per extraction',
-        '5 hours of AI processing',
-        '50GB storage',
-        '5,000 API calls per month',
-        '24/7 support',
-        'CSV export',
-        'Excel export',
-        'Advanced AI extraction',
-        'Team collaboration',
-        'Custom integrations',
-        'Priority processing',
-        'Real-time processing',
-        'Secure file handling'
+        'Up to 2000 contacts',
+        'Premium AI extraction',
+        'All export formats',
+        'Advanced analytics',
+        'Priority support 24/7',
       ]
     };
     
