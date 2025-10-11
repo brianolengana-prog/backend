@@ -248,6 +248,100 @@ class ContactsService {
   }
 
   /**
+   * Export contacts to CSV or other formats
+   */
+  async exportContacts(userId, contactIds, format = 'csv') {
+    try {
+      console.log(`📥 Exporting contacts for user: ${userId}`, { format, count: contactIds?.length || 'all' });
+
+      // Build query
+      const where = {
+        userId,
+        ...(contactIds && contactIds.length > 0 && { id: { in: contactIds } })
+      };
+
+      // Fetch contacts
+      const contacts = await prisma.contact.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          job: {
+            select: {
+              id: true,
+              title: true,
+              fileName: true,
+              status: true,
+              createdAt: true
+            }
+          }
+        }
+      });
+
+      if (contacts.length === 0) {
+        throw new Error('No contacts found to export');
+      }
+
+      console.log(`✅ Exporting ${contacts.length} contacts`);
+
+      // Generate export based on format
+      if (format === 'csv') {
+        return this.generateCSV(contacts);
+      } else {
+        throw new Error(`Unsupported export format: ${format}`);
+      }
+    } catch (error) {
+      console.error('❌ Error exporting contacts:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate CSV from contacts
+   */
+  generateCSV(contacts) {
+    const headers = ['Name', 'Email', 'Phone', 'Role', 'Company', 'Job Title', 'Date Added'];
+    
+    // Build CSV content
+    let csvContent = headers.join(',') + '\n';
+    
+    contacts.forEach(contact => {
+      const row = [
+        this.escapeCSV(contact.name || ''),
+        this.escapeCSV(contact.email || ''),
+        this.escapeCSV(contact.phone || ''),
+        this.escapeCSV(contact.role || ''),
+        this.escapeCSV(contact.company || ''),
+        this.escapeCSV(contact.job?.title || contact.job?.fileName || ''),
+        this.escapeCSV(contact.createdAt ? new Date(contact.createdAt).toLocaleDateString() : '')
+      ];
+      csvContent += row.join(',') + '\n';
+    });
+
+    // Generate filename
+    const timestamp = new Date().toISOString().split('T')[0];
+    const filename = `contacts_${contacts.length}_${timestamp}.csv`;
+
+    return {
+      data: csvContent,
+      filename,
+      mimeType: 'text/csv'
+    };
+  }
+
+  /**
+   * Escape CSV value
+   */
+  escapeCSV(value) {
+    if (value === null || value === undefined) return '';
+    const stringValue = String(value);
+    // If contains comma, quote, or newline, wrap in quotes and escape quotes
+    if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+      return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
+  }
+
+  /**
    * Get health status
    */
   getHealthStatus() {

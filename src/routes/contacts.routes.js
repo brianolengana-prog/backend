@@ -72,6 +72,30 @@ router.get('/:id', async (req, res) => {
 });
 
 /**
+ * GET /api/contacts/export
+ * Export contacts to CSV format
+ */
+router.get('/export', async (req, res) => {
+  try {
+    const { ids, format = 'csv' } = req.query;
+    console.log(`📥 Exporting contacts for user: ${req.user.id}`, { format, ids });
+    
+    const contactIds = ids ? ids.split(',') : undefined;
+    const { data, filename, mimeType } = await contactsService.exportContacts(req.user.id, contactIds, format);
+    
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(data);
+  } catch (error) {
+    console.error('❌ Error exporting contacts:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to export contacts' 
+    });
+  }
+});
+
+/**
  * DELETE /api/contacts/:id
  * Delete a specific contact by ID
  */

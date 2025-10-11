@@ -45,6 +45,17 @@ class AuthService {
     if (existing) throw new Error('User already exists');
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await userRepository.create({ name, email, passwordHash, provider: 'email', emailVerified: false });
+    
+    // ✨ AUTO-CREATE FREE PLAN SUBSCRIPTION
+    try {
+      const subscriptionService = require('./subscription.service');
+      await subscriptionService.createSubscription(user.id, 'free');
+      console.log(`✅ Created free plan subscription for new user: ${user.id}`);
+    } catch (subError) {
+      console.error('❌ Error creating free subscription for new user:', subError);
+      // Continue with registration even if subscription fails
+    }
+    
     const accessToken = this.generateAccessToken(user);
     const refreshToken = this.generateRefreshToken();
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);

@@ -99,15 +99,19 @@ class SubscriptionService {
         throw new Error('Invalid plan ID');
       }
 
-      // Handle free plan - create in database
+      // Handle free plan - create in database with MONTHLY renewal
       if (plan.id === 'free') {
+        const now = new Date();
+        const periodEnd = new Date(now);
+        periodEnd.setMonth(periodEnd.getMonth() + 1); // ✅ 1 MONTH renewal
+        
         const subscription = await prisma.subscription.create({
           data: {
             userId: userId,
             priceId: 'free',
             status: 'active',
-            currentPeriodStart: new Date(),
-            currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd, // Monthly renewal
             cancelAtPeriodEnd: false
           }
         });
