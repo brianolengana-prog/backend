@@ -71,27 +71,6 @@ router.get('/activity', async (req, res) => {
 });
 
 /**
- * GET /api/dashboard/metrics
- * Get performance metrics
- */
-router.get('/metrics', async (req, res) => {
-  try {
-    console.log(`📊 Getting performance metrics for user: ${req.user.id}`);
-    const metrics = await dashboardService.getPerformanceMetrics(req.user.id);
-    res.json({ 
-      success: true, 
-      data: metrics 
-    });
-  } catch (error) {
-    console.error('❌ Error getting performance metrics:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to get performance metrics' 
-    });
-  }
-});
-
-/**
  * GET /api/dashboard/summary
  * Get quick dashboard summary
  */

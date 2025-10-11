@@ -125,71 +125,86 @@ class DashboardService {
 
   /**
    * Get extraction-based metrics for a user
-   * This is the core method that ties all dashboard data to the extraction workflow
+   * OPTIMIZED: Uses aggregation and _count instead of loading all data
    */
   async getExtractionMetrics(userId) {
     try {
       console.log(`📊 Getting extraction metrics for user: ${userId}`);
 
-      // Get all jobs for the user
-      const jobs = await prisma.job.findMany({
-        where: { userId },
-        include: {
-          contacts: true,
-          production: true
-        },
-        orderBy: { createdAt: 'desc' }
-      });
+      // ✅ OPTIMIZATION: Use Promise.all to run queries in parallel
+      const [
+        totalJobs,
+        totalContacts,
+        completedJobsCount,
+        failedJobsCount,
+        recentJobsData
+      ] = await Promise.all([
+        // Count total jobs
+        prisma.job.count({ where: { userId } }),
+        
+        // Count total contacts
+        prisma.contact.count({ where: { userId } }),
+        
+        // Count successful jobs
+        prisma.job.count({
+          where: {
+            userId,
+            status: 'completed'
+          }
+        }),
+        
+        // Count failed jobs
+        prisma.job.count({
+          where: {
+            userId,
+            status: { in: ['failed', 'error'] }
+          }
+        }),
+        
+        // Get recent jobs (last 30 days) with just count of contacts
+        prisma.job.findMany({
+          where: {
+            userId,
+            createdAt: {
+              gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // 7 days ago
+            }
+          },
+          select: {
+            id: true,
+            status: true,
+            createdAt: true,
+            _count: {
+              select: { contacts: true }
+            }
+          }
+        })
+      ]);
 
-      // Calculate metrics from extraction jobs
-      const totalJobs = jobs.length;
-      const successfulJobs = jobs.filter(job => job.status === 'completed' && job.contacts.length > 0);
-      const failedJobs = jobs.filter(job => job.status === 'failed' || job.status === 'error');
+      // Calculate metrics from aggregated data
+      const successfulExtractions = completedJobsCount;
+      const failedExtractions = failedJobsCount;
+
       
-      const totalContacts = jobs.reduce((sum, job) => sum + job.contacts.length, 0);
-      const successfulExtractions = successfulJobs.length;
-      const failedExtractions = failedJobs.length;
-      
-      const averageContactsPerJob = totalJobs > 0 ? Math.round(totalContacts / totalJobs * 100) / 100 : 0;
+      const averageContactsPerJob = totalJobs > 0 ? Math.round((totalContacts / totalJobs) * 100) / 100 : 0;
       const successRate = totalJobs > 0 ? Math.round((successfulExtractions / totalJobs) * 100) : 0;
 
-      // Get recent activity (last 7 days)
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      
-      const recentJobs = jobs.filter(job => job.createdAt >= sevenDaysAgo);
-      const recentContacts = recentJobs.reduce((sum, job) => sum + job.contacts.length, 0);
+      // Calculate recent activity from recentJobsData
+      const recentJobs = recentJobsData.length;
+      const recentContacts = recentJobsData.reduce((sum, job) => sum + job._count.contacts, 0);
 
-      // Get contacts by role
+      // ✅ OPTIMIZATION: Get contacts by role using groupBy (no full contact load)
       const contactsByRole = await prisma.contact.groupBy({
         by: ['role'],
         where: { userId },
         _count: { role: true }
       });
 
-      // Get contacts by production (via job relation)
-      const contactsByProduction = await prisma.contact.findMany({
+      // Get last extraction date (most recent job)
+      const lastJob = await prisma.job.findFirst({
         where: { userId },
-        include: {
-          job: {
-            select: {
-              productionId: true
-            }
-          }
-        }
+        select: { createdAt: true },
+        orderBy: { createdAt: 'desc' }
       });
-
-      // Group by production manually
-      const productionGroups = contactsByProduction.reduce((acc, contact) => {
-        const productionId = contact.job?.productionId || 'unknown';
-        acc[productionId] = (acc[productionId] || 0) + 1;
-        return acc;
-      }, {});
-
-      const contactsByProductionArray = Object.entries(productionGroups).map(([productionId, count]) => ({
-        productionId,
-        count
-      }));
 
       const metrics = {
         totalJobs,
@@ -198,14 +213,13 @@ class DashboardService {
         failedExtractions,
         averageContactsPerJob,
         successRate,
-        recentJobs: recentJobs.length,
+        recentJobs,
         recentContacts,
         contactsByRole: contactsByRole.map(item => ({
           role: item.role || 'Unknown',
           count: item._count.role
         })),
-        contactsByProduction: contactsByProductionArray,
-        lastExtractionDate: jobs.length > 0 ? jobs[0].createdAt : null
+        lastExtractionDate: lastJob?.createdAt || null
       };
 
       console.log(`✅ Extraction metrics for user ${userId}:`, {
@@ -344,6 +358,7 @@ class DashboardService {
 
   /**
    * Get recent activity based on extraction jobs
+   * OPTIMIZED: Only loads job metadata and contact count, not full contacts
    */
   async getRecentActivity(userId) {
     try {
@@ -353,6 +368,7 @@ class DashboardService {
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
+      // ✅ OPTIMIZATION: Only select needed fields and use _count for contacts
       const recentJobs = await prisma.job.findMany({
         where: {
           userId,
@@ -360,9 +376,14 @@ class DashboardService {
             gte: thirtyDaysAgo
           }
         },
-        include: {
-          contacts: true,
-          production: true
+        select: {
+          id: true,
+          status: true,
+          fileName: true,
+          createdAt: true,
+          _count: {
+            select: { contacts: true }
+          }
         },
         orderBy: { createdAt: 'desc' },
         take: 10
@@ -373,10 +394,11 @@ class DashboardService {
         let message = '';
         let type = 'upload';
         let status = 'success';
+        const contactsCount = job._count.contacts;
 
         if (job.status === 'completed') {
-          if (job.contacts.length > 0) {
-            message = `${job.contacts.length} contact${job.contacts.length === 1 ? '' : 's'} extracted from ${job.fileName || 'call sheet'}`;
+          if (contactsCount > 0) {
+            message = `${contactsCount} contact${contactsCount === 1 ? '' : 's'} extracted from ${job.fileName || 'call sheet'}`;
             type = 'contacts';
           } else {
             message = `Call sheet processed but no contacts found`;
@@ -404,7 +426,7 @@ class DashboardService {
           status,
           jobId: job.id,
           fileName: job.fileName,
-          contactsCount: job.contacts.length
+          contactsCount
         };
       });
 
@@ -416,95 +438,6 @@ class DashboardService {
     }
   }
 
-  /**
-   * Get performance metrics based on extraction jobs
-   */
-  async getPerformanceMetrics(userId) {
-    try {
-      console.log(`📊 Getting performance metrics for user: ${userId}`);
-
-      // Get all jobs for the user
-      const jobs = await prisma.job.findMany({
-        where: { userId },
-        include: {
-          contacts: true
-        },
-        orderBy: { createdAt: 'desc' }
-      });
-
-      if (jobs.length === 0) {
-        return {
-          successRate: 0,
-          averageProcessingTime: 0,
-          totalTimeSaved: 0,
-          efficiency: 0,
-          accuracy: 0,
-          totalJobs: 0,
-          totalContacts: 0
-        };
-      }
-
-      // Calculate metrics from actual job data
-      const totalJobs = jobs.length;
-      const successfulJobs = jobs.filter(job => job.status === 'completed' && job.contacts.length > 0);
-      const failedJobs = jobs.filter(job => job.status === 'failed' || job.status === 'error');
-      
-      const successRate = totalJobs > 0 ? Math.round((successfulJobs.length / totalJobs) * 100 * 10) / 10 : 0;
-      
-      // Calculate average processing time (if we have timing data)
-      const jobsWithTiming = jobs.filter(job => job.startedAt && job.completedAt);
-      const averageProcessingTime = jobsWithTiming.length > 0 
-        ? jobsWithTiming.reduce((sum, job) => {
-            const duration = new Date(job.completedAt) - new Date(job.startedAt);
-            return sum + (duration / 1000 / 60); // Convert to minutes
-          }, 0) / jobsWithTiming.length
-        : 2.5; // Default estimate
-
-      // Estimate time saved (assuming manual extraction takes 5 minutes per contact)
-      const totalContacts = jobs.reduce((sum, job) => sum + job.contacts.length, 0);
-      const manualTimePerContact = 5; // minutes
-      const totalTimeSaved = totalContacts * manualTimePerContact;
-
-      // Calculate efficiency (successful extractions vs total attempts)
-      const efficiency = totalJobs > 0 ? Math.round((successfulJobs.length / totalJobs) * 100 * 10) / 10 : 0;
-
-      // Estimate accuracy based on successful extractions with contacts
-      const jobsWithContacts = jobs.filter(job => job.contacts.length > 0);
-      const accuracy = totalJobs > 0 ? Math.round((jobsWithContacts.length / totalJobs) * 100 * 10) / 10 : 0;
-
-      const metrics = {
-        successRate,
-        averageProcessingTime: Math.round(averageProcessingTime * 10) / 10,
-        totalTimeSaved: Math.round(totalTimeSaved),
-        efficiency,
-        accuracy,
-        totalJobs,
-        totalContacts,
-        successfulJobs: successfulJobs.length,
-        failedJobs: failedJobs.length
-      };
-
-      console.log(`✅ Performance metrics for user ${userId}:`, {
-        successRate: `${successRate}%`,
-        avgTime: `${averageProcessingTime.toFixed(1)}min`,
-        timeSaved: `${totalTimeSaved}min`,
-        efficiency: `${efficiency}%`
-      });
-
-      return metrics;
-    } catch (error) {
-      console.error('❌ Error getting performance metrics:', error);
-      return {
-        successRate: 0,
-        averageProcessingTime: 0,
-        totalTimeSaved: 0,
-        efficiency: 0,
-        accuracy: 0,
-        totalJobs: 0,
-        totalContacts: 0
-      };
-    }
-  }
 }
 
 module.exports = new DashboardService();
