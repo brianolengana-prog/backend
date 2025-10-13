@@ -20,6 +20,7 @@ const textExtractionRoutes = require('./routes/textExtraction.routes');
 const jobsRoutes = require('./routes/jobs.routes');
 const usageRoutes = require('./routes/usage.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
+const dashboardAggregatedRoutes = require('./routes/dashboard-aggregated.routes');
 const upgradeWorkflowRoutes = require('./routes/upgradeWorkflow.routes');
 const contactsRoutes = require('./routes/contacts.routes');
 const supportRoutes = require('./routes/support.routes');
@@ -103,6 +104,7 @@ app.use('/api/extraction', textExtractionRoutes); // Text processing routes
 app.use('/api/jobs', jobsRoutes);
 app.use('/api/usage', usageRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/dashboard', dashboardAggregatedRoutes); // Aggregated endpoint for performance
 app.use('/api/upgrade', upgradeWorkflowRoutes);
 app.use('/api/contacts', contactsRoutes);
 app.use('/api/support', supportRoutes); // Support email service

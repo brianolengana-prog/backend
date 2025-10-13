@@ -66,40 +66,63 @@ class OptimizedHybridExtractionService {
         ...options
       });
       
-      // Step 2: Calculate confidence score
+      // Step 2: Calculate confidence and quality scores
       const confidenceScore = this.calculateConfidenceScore(patternResults);
+      let finalContacts = patternResults.contacts || [];
+      const qualityScore = this.calculateContactQualityScore(finalContacts);
+      const qualityMetrics = this.getQualityMetrics(finalContacts);
       
       logger.info('📊 Robust pattern extraction results', {
         extractionId,
-        contactsFound: patternResults.contacts?.length || 0,
-        confidenceScore,
-        needsAI: confidenceScore < this.confidenceThreshold,
+        contactsFound: finalContacts.length,
+        confidenceScore: confidenceScore.toFixed(2),
+        qualityScore: qualityScore.toFixed(2),
+        qualityMetrics,
         patternsUsed: patternResults.metadata?.patternsUsed
       });
 
-      let finalContacts = patternResults.contacts || [];
       let aiUsed = false;
 
-      // Step 3: AI enhancement only if needed and patterns found few contacts
-      if ((confidenceScore < this.confidenceThreshold || finalContacts.length < 3) && this.isAIAvailable) {
+      // Step 3: AI enhancement based on QUALITY not just quantity
+      const needsAIEnhancement = this.shouldUseAI(finalContacts, confidenceScore);
+      
+      if (needsAIEnhancement && this.isAIAvailable) {
+        const reason = qualityScore < 0.5 ? 'low_quality_contacts' : 
+                       finalContacts.length < 5 ? 'few_contacts' : 
+                       qualityScore < 0.6 ? 'incomplete_data' : 'low_confidence';
+        
         logger.info('🤖 Applying AI enhancement', { 
           extractionId,
-          reason: confidenceScore < this.confidenceThreshold ? 'low_confidence' : 'few_contacts'
+          reason,
+          qualityScore: qualityScore.toFixed(2),
+          contactsWithEmail: qualityMetrics.withEmail,
+          contactsWithPhone: qualityMetrics.withPhone
         });
         
         const aiResults = await this.enhanceWithAI(text, finalContacts, extractionId);
         finalContacts = this.mergeContacts(finalContacts, aiResults);
         aiUsed = true;
+      } else {
+        logger.info('✅ Skipping AI enhancement - quality sufficient', {
+          extractionId,
+          qualityScore: qualityScore.toFixed(2),
+          contactCount: finalContacts.length,
+          completeProfiles: qualityMetrics.completeProfiles
+        });
       }
 
       // Step 4: Clean and validate results
       const cleanedContacts = this.cleanAndValidateContacts(finalContacts);
 
       const processingTime = Date.now() - startTime;
+      const finalQualityMetrics = this.getQualityMetrics(cleanedContacts);
+      const finalQualityScore = this.calculateContactQualityScore(cleanedContacts);
 
       logger.info('✅ Optimized extraction complete', {
         extractionId,
         finalContactCount: cleanedContacts.length,
+        finalQualityScore: finalQualityScore.toFixed(2),
+        finalQualityMetrics,
         aiUsed,
         processingTime
       });
@@ -111,6 +134,8 @@ class OptimizedHybridExtractionService {
           extractionId,
           strategy: aiUsed ? 'hybrid' : 'pattern-only',
           confidenceScore,
+          qualityScore: finalQualityScore,
+          qualityMetrics: finalQualityMetrics,
           processingTime,
           textLength: text.length
         },
@@ -200,6 +225,111 @@ class OptimizedHybridExtractionService {
     }, 0);
 
     return totalConfidence / patternResults.contacts.length;
+  }
+
+  /**
+   * Calculate contact quality score (0-1)
+   * Quality = completeness of contact data (email, phone, role, company)
+   */
+  calculateContactQualityScore(contacts) {
+    if (!contacts || contacts.length === 0) return 0;
+    
+    let qualityPoints = 0;
+    let maxPoints = contacts.length * 3; // 3 points per contact max
+    
+    contacts.forEach(contact => {
+      // 1 point for having valid email
+      if (contact.email && this.isValidEmail(contact.email)) {
+        qualityPoints += 1;
+      }
+      
+      // 1 point for having valid phone
+      if (contact.phone && this.isValidPhone(contact.phone)) {
+        qualityPoints += 1;
+      }
+      
+      // 1 point for having company or role
+      if (contact.company || contact.role) {
+        qualityPoints += 1;
+      }
+    });
+    
+    return qualityPoints / maxPoints;
+  }
+
+  /**
+   * Validate email format
+   */
+  isValidEmail(email) {
+    if (!email || typeof email !== 'string') return false;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email.trim());
+  }
+
+  /**
+   * Validate phone format
+   */
+  isValidPhone(phone) {
+    if (!phone || typeof phone !== 'string') return false;
+    // Remove all non-digit characters
+    const digits = phone.replace(/\D/g, '');
+    // Valid if 10+ digits
+    return digits.length >= 10;
+  }
+
+  /**
+   * Determine if AI enhancement is needed based on quality
+   */
+  shouldUseAI(contacts, confidenceScore) {
+    const contactCount = contacts.length;
+    const qualityScore = this.calculateContactQualityScore(contacts);
+    
+    // Use AI if:
+    // 1. Very few contacts (< 5)
+    // 2. Low quality contacts (score < 0.5) - missing email/phone
+    // 3. Medium quality but incomplete (score < 0.6 and count < 20)
+    // 4. Low pattern confidence
+    
+    const veryFewContacts = contactCount < 5;
+    const lowQuality = qualityScore < 0.5;
+    const mediumQualityButIncomplete = qualityScore < 0.6 && contactCount < 20;
+    const lowConfidence = confidenceScore < 0.6;
+    
+    return veryFewContacts || lowQuality || mediumQualityButIncomplete || lowConfidence;
+  }
+
+  /**
+   * Get detailed quality metrics
+   */
+  getQualityMetrics(contacts) {
+    if (!contacts || contacts.length === 0) {
+      return {
+        total: 0,
+        withEmail: 0,
+        withPhone: 0,
+        withBoth: 0,
+        withCompany: 0,
+        withRole: 0,
+        completeProfiles: 0
+      };
+    }
+
+    return {
+      total: contacts.length,
+      withEmail: contacts.filter(c => c.email && this.isValidEmail(c.email)).length,
+      withPhone: contacts.filter(c => c.phone && this.isValidPhone(c.phone)).length,
+      withBoth: contacts.filter(c => 
+        c.email && this.isValidEmail(c.email) && 
+        c.phone && this.isValidPhone(c.phone)
+      ).length,
+      withCompany: contacts.filter(c => c.company).length,
+      withRole: contacts.filter(c => c.role).length,
+      completeProfiles: contacts.filter(c => 
+        c.email && this.isValidEmail(c.email) &&
+        c.phone && this.isValidPhone(c.phone) &&
+        (c.company || c.role)
+      ).length
+    };
   }
 
   /**
