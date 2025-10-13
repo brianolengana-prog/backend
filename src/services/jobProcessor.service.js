@@ -245,14 +245,16 @@ class JobProcessorService {
       const job = await prisma.job.create({
         data: {
           userId,
-          externalJobId,
           title: `Extraction - ${fileName}`,
           fileName,
           status: 'COMPLETED',
-          metadata: {
+          // ✅ FIXED: Store all metadata in processedContacts JSON field
+          processedContacts: {
+            externalJobId,
             fileId,
             extractionMethod: result.metadata?.extractionMethod || 'hybrid',
-            qualityScore: this.calculateQualityScore(result.contacts || [])
+            qualityScore: this.calculateQualityScore(result.contacts || []),
+            metadata: result.metadata
           }
         }
       });

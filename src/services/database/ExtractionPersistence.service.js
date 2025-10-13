@@ -56,16 +56,21 @@ class ExtractionPersistenceService {
             userId,
             title: options.title || `Extraction - ${fileData.originalname}`,
             fileName: fileData.originalname,
-            fileType: fileData.mimetype?.split('/')[1] || 'unknown',
+            // ✅ FIXED: Removed invalid fields (fileType, extractionMethod, etc.)
+            // Store metadata in processedContacts JSON field instead
             fileSize: fileData.size,
             fileHash: options.fileHash,
             status: 'COMPLETED',
-            extractionMethod: extractionResult.metadata?.extractionMethod || 'unknown',
-            processingTime: extractionResult.metadata?.processingTime || 0,
-            documentType: extractionResult.metadata?.documentType,
-            metadata: extractionResult.metadata || {},
-            startedAt: options.startedAt || new Date(),
-            completedAt: new Date()
+            processedContacts: {
+              // Store all extraction metadata in JSON field
+              extractionMethod: extractionResult.metadata?.extractionMethod || 'unknown',
+              processingTime: extractionResult.metadata?.processingTime || 0,
+              documentType: extractionResult.metadata?.documentType,
+              metadata: extractionResult.metadata || {},
+              startedAt: options.startedAt || new Date(),
+              completedAt: new Date(),
+              mimetype: fileData.mimetype
+            }
           }
         });
         
