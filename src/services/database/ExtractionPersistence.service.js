@@ -287,16 +287,14 @@ class ExtractionPersistenceService {
    * @private
    */
   isValidContact(contact) {
-    // Must have a name
-    if (!contact.name || contact.name.length < 2) {
+    // ✅ RELAXED VALIDATION: Only require a name
+    // Allow contacts without email/phone - user can filter later
+    if (!contact.name || contact.name.trim().length === 0) {
       return false;
     }
     
-    // Must have at least email OR phone
-    if (!contact.email && !contact.phone) {
-      return false;
-    }
-    
+    // Accept all contacts that have a name
+    // Email and phone are optional
     return true;
   }
   

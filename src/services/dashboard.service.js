@@ -149,7 +149,7 @@ class DashboardService {
         prisma.job.count({
           where: {
             userId,
-            status: 'completed'
+            status: 'COMPLETED'  // ✅ FIX: Use uppercase to match Prisma enum
           }
         }),
         
@@ -157,7 +157,7 @@ class DashboardService {
         prisma.job.count({
           where: {
             userId,
-            status: { in: ['failed', 'error'] }
+            status: 'FAILED'  // ✅ FIX: Use uppercase enum value
           }
         }),
         
@@ -396,7 +396,7 @@ class DashboardService {
         let status = 'success';
         const contactsCount = job._count.contacts;
 
-        if (job.status === 'completed') {
+        if (job.status === 'COMPLETED') {  // ✅ FIX: Uppercase enum
           if (contactsCount > 0) {
             message = `${contactsCount} contact${contactsCount === 1 ? '' : 's'} extracted from ${job.fileName || 'call sheet'}`;
             type = 'contacts';
@@ -405,11 +405,11 @@ class DashboardService {
             type = 'processing';
             status = 'warning';
           }
-        } else if (job.status === 'failed' || job.status === 'error') {
+        } else if (job.status === 'FAILED') {  // ✅ FIX: Uppercase enum
           message = `Extraction failed for ${job.fileName || 'call sheet'}`;
           type = 'error';
           status = 'error';
-        } else if (job.status === 'processing') {
+        } else if (job.status === 'PROCESSING') {  // ✅ FIX: Uppercase enum
           message = `Processing ${job.fileName || 'call sheet'}...`;
           type = 'processing';
           status = 'processing';
