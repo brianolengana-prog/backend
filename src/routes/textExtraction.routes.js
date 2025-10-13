@@ -68,6 +68,7 @@ router.post('/process-text', smartRateLimit('textExtraction'), async (req, res) 
       fileType, 
       extractionMethod = 'hybrid',
       rolePreferences = [],
+      clientSideContacts = [], // ✅ RECEIVE CLIENT-SIDE CONTACTS
       options = {},
       priority = 'normal'
     } = req.body;
@@ -78,7 +79,8 @@ router.post('/process-text', smartRateLimit('textExtraction'), async (req, res) 
       fileType,
       textLength: text?.length || 0,
       extractionMethod,
-      hasRolePreferences: Array.isArray(rolePreferences) && rolePreferences.length > 0
+      hasRolePreferences: Array.isArray(rolePreferences) && rolePreferences.length > 0,
+      clientSideContactsReceived: Array.isArray(clientSideContacts) ? clientSideContacts.length : 0 // ✅ LOG CLIENT CONTACTS
     });
 
     // Validate required fields
@@ -160,6 +162,7 @@ router.post('/process-text', smartRateLimit('textExtraction'), async (req, res) 
       documentType,
       maxContacts: 1000,
       maxProcessingTime: 60000, // 60 seconds timeout for AI processing
+      clientSideContacts: Array.isArray(clientSideContacts) ? clientSideContacts : [], // ✅ PASS CLIENT CONTACTS TO EXTRACTION
       ...parsedOptions
     };
 

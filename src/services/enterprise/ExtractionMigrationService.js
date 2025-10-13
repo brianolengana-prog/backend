@@ -98,6 +98,7 @@ class ExtractionMigrationService {
   async extractContacts(text, options = {}) {
     const extractionId = options.extractionId || `migration_${Date.now()}`;
     const userId = options.userId;
+    const clientSideContacts = options.clientSideContacts || [];
 
     try {
       const useEnterprise = this.shouldUseEnterpriseExtraction(userId, options);
@@ -106,7 +107,8 @@ class ExtractionMigrationService {
         extractionId,
         userId,
         useEnterprise,
-        textLength: text.length
+        textLength: text.length,
+        clientSideContactsReceived: clientSideContacts.length // ✅ LOG CLIENT CONTACTS
       });
 
           // Always use optimized hybrid extraction for best performance
@@ -128,8 +130,11 @@ class ExtractionMigrationService {
               }
             );
 
+            // ✅ MERGE CLIENT-SIDE CONTACTS WITH BACKEND RESULTS
+            const mergedResult = this.mergeClientSideContacts(enhancedResult, clientSideContacts, extractionId);
+
             // Transform to legacy format for compatibility
-            return this.transformOptimizedToLegacy(enhancedResult, extractionId);
+            return this.transformOptimizedToLegacy(mergedResult, extractionId);
           } else {
         // Use legacy extraction (fallback)
         const result = await this.legacyExtractor.extractContacts(text, options.fileName, options.mimeType, {
@@ -137,8 +142,11 @@ class ExtractionMigrationService {
           extractionId
         });
 
+        // ✅ MERGE CLIENT-SIDE CONTACTS WITH LEGACY RESULTS
+        const mergedResult = this.mergeClientSideContacts(result, clientSideContacts, extractionId);
+
         // Ensure legacy result has proper format
-        return this.normalizeLegacyResult(result, extractionId);
+        return this.normalizeLegacyResult(mergedResult, extractionId);
       }
 
     } catch (error) {
@@ -157,13 +165,44 @@ class ExtractionMigrationService {
           extractionId
         });
 
-        return this.normalizeLegacyResult(fallbackResult, extractionId);
+        // ✅ MERGE CLIENT-SIDE CONTACTS WITH FALLBACK RESULTS
+        const mergedFallbackResult = this.mergeClientSideContacts(fallbackResult, clientSideContacts, extractionId);
+
+        return this.normalizeLegacyResult(mergedFallbackResult, extractionId);
 
       } catch (fallbackError) {
         logger.error('❌ Fallback extraction also failed', {
           extractionId,
           fallbackError: fallbackError.message
         });
+        
+        // ✅ LAST RESORT: If everything fails, return client-side contacts
+        if (clientSideContacts.length > 0) {
+          logger.info('✅ Using client-side contacts as last resort', {
+            extractionId,
+            clientSideCount: clientSideContacts.length
+          });
+          
+          return {
+            success: true,
+            contacts: clientSideContacts.map(contact => ({
+              ...contact,
+              id: contact.id || `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              source: 'client-side-fallback',
+              confidence: contact.confidence || 0.7
+            })),
+            metadata: {
+              extractionId,
+              strategy: 'client-side-only',
+              confidence: 0.7,
+              processingTime: 0,
+              textLength: text.length,
+              isEnterprise: false,
+              note: 'Backend extraction failed, using client-side contacts only'
+            }
+          };
+        }
+        
         throw error; // Throw original error
       }
     }
@@ -238,6 +277,81 @@ class ExtractionMigrationService {
   }
 
   /**
+   * Merge client-side contacts with backend extraction results
+   */
+  mergeClientSideContacts(backendResult, clientSideContacts, extractionId) {
+    if (!Array.isArray(clientSideContacts) || clientSideContacts.length === 0) {
+      logger.info('📋 No client-side contacts to merge', { extractionId });
+      return backendResult;
+    }
+
+    const backendContacts = backendResult.contacts || [];
+    
+    logger.info('🔄 Merging client-side and backend contacts', {
+      extractionId,
+      clientSideCount: clientSideContacts.length,
+      backendCount: backendContacts.length
+    });
+
+    // ✅ FALLBACK: If backend found 0 contacts, use client-side contacts
+    if (backendContacts.length === 0 && clientSideContacts.length > 0) {
+      logger.info('✅ Using client-side contacts as fallback (backend found 0)', {
+        extractionId,
+        clientSideCount: clientSideContacts.length
+      });
+      
+      return {
+        ...backendResult,
+        contacts: clientSideContacts.map(contact => ({
+          ...contact,
+          source: 'client-side-pattern',
+          confidence: contact.confidence || 0.7
+        })),
+        metadata: {
+          ...backendResult.metadata,
+          strategy: 'client-side-fallback',
+          clientSideContactsUsed: clientSideContacts.length
+        }
+      };
+    }
+
+    // ✅ MERGE: Deduplicate and combine both sources
+    const mergedContacts = [...backendContacts];
+    const existingEmails = new Set(backendContacts.map(c => c.email?.toLowerCase()).filter(Boolean));
+    const existingPhones = new Set(backendContacts.map(c => c.phone).filter(Boolean));
+    
+    for (const clientContact of clientSideContacts) {
+      const isDuplicate = 
+        (clientContact.email && existingEmails.has(clientContact.email.toLowerCase())) ||
+        (clientContact.phone && existingPhones.has(clientContact.phone));
+      
+      if (!isDuplicate) {
+        mergedContacts.push({
+          ...clientContact,
+          source: 'client-side-pattern',
+          confidence: clientContact.confidence || 0.7
+        });
+      }
+    }
+
+    logger.info('✅ Contacts merged', {
+      extractionId,
+      finalCount: mergedContacts.length,
+      backendContributed: backendContacts.length,
+      clientSideAdded: mergedContacts.length - backendContacts.length
+    });
+
+    return {
+      ...backendResult,
+      contacts: mergedContacts,
+      metadata: {
+        ...backendResult.metadata,
+        clientSideContactsMerged: clientSideContacts.length
+      }
+    };
+  }
+
+  /**
    * Transform optimized service result to legacy format
    */
   transformOptimizedToLegacy(optimizedResult, extractionId) {
@@ -266,7 +380,8 @@ class ExtractionMigrationService {
         processingTime: optimizedResult.metadata?.processingTime || 0,
         textLength: optimizedResult.metadata?.textLength || 0,
         isEnterprise: true,
-        isOptimized: true
+        isOptimized: true,
+        clientSideContactsMerged: optimizedResult.metadata?.clientSideContactsMerged || 0
       }
     };
   }
