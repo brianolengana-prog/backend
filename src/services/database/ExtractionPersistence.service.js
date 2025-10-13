@@ -196,10 +196,10 @@ class ExtractionPersistenceService {
         role: this.normalizeRole(contact.role),
         email: this.normalizeEmail(contact.email),
         phone: this.normalizePhone(contact.phone),
-        company: this.normalizeCompany(contact.company),
-        department: contact.department || null,
-        confidence: this.normalizeConfidence(contact.confidence),
-        metadata: contact.metadata || {}
+        company: this.normalizeCompany(contact.company)
+        // ✅ FIXED: Removed invalid fields (department, confidence, metadata)
+        // These don't exist in the Prisma schema
+        // Store additional data in job.processedContacts if needed
       }))
       .filter(contact => this.isValidContact(contact));
   }
