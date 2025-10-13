@@ -47,8 +47,21 @@ router.post('/google/callback', async (req, res) => {
   }
 });
 
+// ✅ EXPLICIT OPTIONS HANDLER for Google OAuth (prevents cold start CORS issues)
+router.options('/google/url', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.sendStatus(204);
+});
+
 router.get('/google/url', async (req, res) => {
   try {
+    // ✅ EXPLICIT CORS HEADERS (defense in depth for Render cold starts)
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    
     const url = authService.getGoogleAuthUrl();
     res.json({ success: true, url });
   } catch (e) {
