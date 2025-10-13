@@ -6,9 +6,21 @@
 const express = require('express');
 const { authenticate } = require('../middleware/auth');
 const prisma = require('../config/database').getClient();
-const logger = require('../utils/logger');
+const winston = require('winston');
 
 const router = express.Router();
+
+// Configure logger
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console()
+  ]
+});
 
 /**
  * GET /api/dashboard/all
