@@ -9,6 +9,21 @@ const router = express.Router();
 router.use(authenticateToken);
 
 /**
+ * Normalize job data from database (snake_case) to API format (camelCase)
+ */
+function normalizeJob(job) {
+  return {
+    id: job.id,
+    title: job.title,
+    file_name: job.fileName || job.file_name,  // ✅ Support both formats
+    fileName: job.fileName || job.file_name,   // ✅ Normalize to camelCase
+    status: job.status,
+    createdAt: job.createdAt || job.created_at,
+    created_at: job.createdAt || job.created_at  // ✅ Backward compatibility
+  };
+}
+
+/**
  * GET /api/jobs
  * Return jobs for the authenticated user
  */
@@ -26,7 +41,11 @@ router.get('/', async (req, res) => {
       }
     });
 
-    res.json({ success: true, data: jobs });
+    // ✅ Normalize all jobs to use camelCase field names
+    const normalizedJobs = jobs.map(job => normalizeJob(job));
+
+    console.log(`✅ Returning ${normalizedJobs.length} jobs (normalized to camelCase)`);
+    res.json({ success: true, data: normalizedJobs });
   } catch (error) {
     console.error('❌ Error fetching jobs:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch jobs' });

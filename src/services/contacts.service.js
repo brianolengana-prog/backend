@@ -126,6 +126,36 @@ class ContactsService {
   }
 
   /**
+   * Normalize contact data from database (snake_case) to API format (camelCase)
+   * @private
+   */
+  normalizeContact(contact) {
+    return {
+      id: contact.id,
+      jobId: contact.jobId || contact.job_id,  // ✅ Normalize field name
+      userId: contact.userId || contact.user_id,
+      name: contact.name,
+      email: contact.email,
+      phone: contact.phone,
+      role: contact.role,
+      company: contact.company,
+      isSelected: contact.isSelected ?? contact.is_selected ?? true,
+      createdAt: contact.createdAt || contact.created_at,
+      updatedAt: contact.updatedAt || contact.updated_at,
+      // Include job relation if present
+      ...(contact.job && {
+        job: {
+          id: contact.job.id,
+          title: contact.job.title,
+          fileName: contact.job.fileName || contact.job.file_name,
+          status: contact.job.status,
+          createdAt: contact.job.createdAt || contact.job.created_at
+        }
+      })
+    };
+  }
+
+  /**
    * Get all contacts for a user
    */
   async getContacts(userId, options = {}) {
@@ -165,6 +195,7 @@ class ContactsService {
               select: {
                 id: true,
                 title: true,
+                fileName: true,
                 status: true,
                 createdAt: true
               }
@@ -174,8 +205,11 @@ class ContactsService {
         prisma.contact.count({ where })
       ]);
 
-      // Return just the contacts array to match frontend expectations
-      return contacts;
+      // ✅ Normalize all contacts to use camelCase field names
+      const normalizedContacts = contacts.map(contact => this.normalizeContact(contact));
+
+      console.log(`✅ Returning ${normalizedContacts.length} contacts (normalized to camelCase)`);
+      return normalizedContacts;
     } catch (error) {
       console.error('❌ Error getting contacts:', error);
       throw error;
@@ -199,6 +233,7 @@ class ContactsService {
             select: {
               id: true,
               title: true,
+              fileName: true,
               status: true,
               createdAt: true,
               productionId: true
@@ -211,7 +246,8 @@ class ContactsService {
         throw new Error('Contact not found');
       }
 
-      return contact;
+      // ✅ Normalize to camelCase
+      return this.normalizeContact(contact);
     } catch (error) {
       console.error('❌ Error getting contact:', error);
       throw error;
