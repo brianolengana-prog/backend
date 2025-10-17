@@ -172,7 +172,8 @@ class ContactsService {
         role = '',
         jobId = '',
         sortBy = 'created_at',
-        sortOrder = 'desc'
+        sortOrder = 'desc',
+        requireContact = 'true'  // ✅ NEW: Quality filter - only contacts with email OR phone
       } = options;
 
       // Build where clause with filters
@@ -188,7 +189,25 @@ class ContactsService {
           ]
         }),
         ...(role && role !== 'all' && { role: { contains: role, mode: 'insensitive' } }),
-        ...(jobId && jobId !== 'all' && { jobId })
+        ...(jobId && jobId !== 'all' && { jobId }),
+        // ✅ QUALITY FILTER: Only contacts with valid email OR phone
+        ...(requireContact === 'true' && {
+          OR: [
+            { 
+              AND: [
+                { email: { not: null } },
+                { email: { not: '' } },
+                { email: { contains: '@' } }
+              ]
+            },
+            {
+              AND: [
+                { phone: { not: null } },
+                { phone: { not: '' } }
+              ]
+            }
+          ]
+        })
       };
 
       // Build orderBy clause

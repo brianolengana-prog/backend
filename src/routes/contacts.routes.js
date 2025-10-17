@@ -40,6 +40,7 @@ router.get('/stats', async (req, res) => {
  * - jobId: Filter by specific job/callsheet
  * - sortBy: Sort field (created_at, name, email)
  * - sortOrder: Sort order (asc, desc)
+ * - requireContact: Only show contacts with email OR phone (default: 'true')
  */
 router.get('/', async (req, res) => {
   try {
@@ -50,7 +51,8 @@ router.get('/', async (req, res) => {
       role = '',
       jobId = '',
       sortBy = 'created_at',
-      sortOrder = 'desc'
+      sortOrder = 'desc',
+      requireContact = 'true'
     } = req.query;
 
     // Parse pagination params
@@ -87,7 +89,8 @@ router.get('/', async (req, res) => {
       role,
       jobId,
       sortBy,
-      sortOrder
+      sortOrder,
+      requireContact
     };
 
     const result = await contactsService.getContactsPaginated(req.user.id, options);
