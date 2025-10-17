@@ -93,10 +93,12 @@ class ContactsService {
 
       const stats = {
         totalContacts,
-        recentContacts,
-        contactsWithEmail,
-        contactsWithPhone,
+        withEmail: contactsWithEmail,  // ✅ FIX: Match frontend expected field name
+        withPhone: contactsWithPhone,  // ✅ FIX: Match frontend expected field name
         totalJobs: jobsWithContacts.length,
+        recentContacts,
+        contactsWithEmail,  // Keep for backward compatibility
+        contactsWithPhone,  // Keep for backward compatibility
         contactsByRole: contactsByRole.map(item => ({
           role: item.role || 'Unknown',
           count: item._count.role
