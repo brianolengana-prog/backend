@@ -156,20 +156,24 @@ class ContactsService {
   }
 
   /**
-   * Get all contacts for a user
+   * Get paginated contacts for a user with metadata
+   * ⚡ OPTIMIZED: Returns contacts with pagination info
    */
-  async getContacts(userId, options = {}) {
+  async getContactsPaginated(userId, options = {}) {
     try {
-      console.log(`📋 Getting contacts for user: ${userId}`);
+      console.log(`📋 Getting paginated contacts for user: ${userId}`, options);
 
       const {
         page = 1,
-        limit = 50,
+        limit = 25,
         search = '',
         role = '',
-        productionId = ''
+        jobId = '',
+        sortBy = 'created_at',
+        sortOrder = 'desc'
       } = options;
 
+      // Build where clause with filters
       const where = {
         userId,
         ...(search && {
@@ -177,19 +181,25 @@ class ContactsService {
             { name: { contains: search, mode: 'insensitive' } },
             { email: { contains: search, mode: 'insensitive' } },
             { phone: { contains: search, mode: 'insensitive' } },
-            { role: { contains: role, mode: 'insensitive' } }
+            { role: { contains: search, mode: 'insensitive' } },
+            { company: { contains: search, mode: 'insensitive' } }
           ]
         }),
-        ...(role && { role: { contains: role, mode: 'insensitive' } }),
-        ...(productionId && { job: { productionId } })
+        ...(role && role !== 'all' && { role: { contains: role, mode: 'insensitive' } }),
+        ...(jobId && jobId !== 'all' && { jobId })
       };
 
+      // Build orderBy clause
+      const orderByField = sortBy === 'created_at' ? 'createdAt' : sortBy;
+      const orderBy = { [orderByField]: sortOrder };
+
+      // Execute queries in parallel for better performance
       const [contacts, total] = await Promise.all([
         prisma.contact.findMany({
           where,
           skip: (page - 1) * limit,
           take: limit,
-          orderBy: { createdAt: 'desc' },
+          orderBy,
           include: {
             job: {
               select: {
@@ -208,8 +218,45 @@ class ContactsService {
       // ✅ Normalize all contacts to use camelCase field names
       const normalizedContacts = contacts.map(contact => this.normalizeContact(contact));
 
-      console.log(`✅ Returning ${normalizedContacts.length} contacts (normalized to camelCase)`);
-      return normalizedContacts;
+      // Calculate pagination metadata
+      const totalPages = Math.ceil(total / limit);
+      const hasMore = page < totalPages;
+
+      const result = {
+        contacts: normalizedContacts,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasMore
+        }
+      };
+
+      console.log(`✅ Returning ${normalizedContacts.length} of ${total} contacts (page ${page}/${totalPages})`);
+      return result;
+    } catch (error) {
+      console.error('❌ Error getting paginated contacts:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all contacts for a user (legacy - for backward compatibility)
+   * @deprecated Use getContactsPaginated instead for better performance
+   */
+  async getContacts(userId, options = {}) {
+    try {
+      console.log(`📋 Getting contacts for user: ${userId} (legacy method)`);
+      
+      // Use paginated method but return all results
+      const result = await this.getContactsPaginated(userId, {
+        ...options,
+        page: 1,
+        limit: options.limit || 1000 // Return up to 1000 for backward compatibility
+      });
+
+      return result.contacts;
     } catch (error) {
       console.error('❌ Error getting contacts:', error);
       throw error;
