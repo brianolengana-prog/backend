@@ -186,15 +186,26 @@ router.post('/upload', smartRateLimit('fileUpload'), upload.single('file'), asyn
       console.log('✅ Found cached extraction from', recentExtraction.createdAt);
       console.log('✅ Serving', recentExtraction.contacts.length, 'contacts from cache');
       
+      // Normalize contacts to match frontend expected format using contacts service
+      const contactsService = require('../services/contacts.service');
+      const normalizedContacts = recentExtraction.contacts.map(contact => 
+        contactsService.normalizeContact(contact)
+      );
+      
+      console.log('📊 Normalized contacts for response:', normalizedContacts.length);
+      
       // Increment usage (still counts as an upload)
       await usageService.incrementUsage(userId, 'upload', 1);
+      
+      // Record the upload with correct contact count
+      await usageService.recordUpload(userId, normalizedContacts.length);
       
       return res.json({
         success: true,
         jobId: recentExtraction.id,
         status: 'completed',
         result: {
-          contacts: recentExtraction.contacts,
+          contacts: normalizedContacts,
           metadata: {
             fromCache: true,
             cacheAge: Date.now() - recentExtraction.createdAt.getTime(),
