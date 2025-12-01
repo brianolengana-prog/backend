@@ -89,54 +89,88 @@ class ExtractionStrategyFactory {
   }
 
   /**
-   * Select best strategy for document
+   * Select best strategy for document automatically
    * 
-   * Selection logic:
+   * Intelligent selection logic (hides complexity from users):
    * 1. Check which strategies are available
-   * 2. Calculate confidence for each
-   * 3. Consider document characteristics
-   * 4. Return best match
+   * 2. Calculate confidence for each based on document characteristics
+   * 3. Prefer fast, free strategies when confidence is similar
+   * 4. Use AI for complex/unstructured documents when needed
+   * 5. Return best match automatically
    * 
    * @param {object} documentAnalysis - Document analysis
    * @param {object} options - Selection options
-   * @param {string} options.preferredStrategy - Force specific strategy ('pattern', 'ai')
-   * @param {boolean} options.preferFast - Prefer fast strategies
-   * @param {boolean} options.preferFree - Prefer free strategies
+   * @param {string} options.preferredStrategy - Force specific strategy (for testing/admin only)
+   * @param {boolean} options.preferFast - Prefer fast strategies (default: true)
+   * @param {boolean} options.preferFree - Prefer free strategies (default: true)
    * @returns {Promise<ExtractionStrategy>} Selected strategy
    */
   async selectStrategy(documentAnalysis = {}, options = {}) {
-    // Force specific strategy if requested
-    if (options.preferredStrategy) {
+    // Force specific strategy if requested (admin/testing only - not for users)
+    if (options.preferredStrategy && options.preferredStrategy !== 'auto') {
       return this._getStrategyByName(options.preferredStrategy);
     }
 
-    // Get available strategies
+    // Get available strategies with confidence scores
     const availableStrategies = await this.getAvailableStrategies(documentAnalysis);
 
     if (availableStrategies.length === 0) {
       throw new Error('No extraction strategies available');
     }
 
-    // Filter by preferences
+    // Intelligent auto-selection logic
+    // Default: prefer fast and free when confidence is similar
+    const preferFast = options.preferFast !== false; // Default: true
+    const preferFree = options.preferFree !== false; // Default: true
+
+    // Filter candidates based on preferences
     let candidates = availableStrategies;
 
-    // Prefer fast strategies
-    if (options.preferFast) {
-      candidates = candidates.filter(s => s.speed === 'fast');
-      if (candidates.length === 0) {
-        candidates = availableStrategies; // Fallback to all
+    // If document is a call sheet (structured), pattern extraction is usually best
+    if (documentAnalysis.type === 'call_sheet' || documentAnalysis.type === 'structured') {
+      // Prefer pattern for structured documents
+      const patternStrategy = candidates.find(s => s.name.includes('Pattern'));
+      if (patternStrategy && patternStrategy.confidence >= 0.8) {
+        return patternStrategy.strategy;
       }
     }
 
-    // Prefer free strategies
-    if (options.preferFree) {
-      candidates = candidates.filter(s => s.cost === 'free');
-      if (candidates.length === 0) {
-        candidates = availableStrategies; // Fallback to all
+    // If document is complex or unstructured, consider AI
+    if (documentAnalysis.complexity === 'high' || documentAnalysis.type === 'unknown') {
+      const aiStrategy = candidates.find(s => s.name.includes('AI'));
+      const patternStrategy = candidates.find(s => s.name.includes('Pattern'));
+      
+      // Use AI if available and pattern confidence is low
+      if (aiStrategy && patternStrategy && patternStrategy.confidence < 0.7) {
+        return aiStrategy.strategy;
       }
     }
 
-    // Select highest confidence from candidates
+    // Prefer fast strategies when confidence is similar
+    if (preferFast) {
+      const fastStrategies = candidates.filter(s => s.speed === 'fast');
+      if (fastStrategies.length > 0) {
+        // If fastest strategy has good confidence, use it
+        const bestFast = fastStrategies[0];
+        if (bestFast.confidence >= 0.8) {
+          return bestFast.strategy;
+        }
+      }
+    }
+
+    // Prefer free strategies when confidence is similar
+    if (preferFree) {
+      const freeStrategies = candidates.filter(s => s.cost === 'free');
+      if (freeStrategies.length > 0) {
+        const bestFree = freeStrategies[0];
+        // Use free strategy if confidence is acceptable
+        if (bestFree.confidence >= 0.75) {
+          return bestFree.strategy;
+        }
+      }
+    }
+
+    // Default: Select highest confidence strategy
     const selected = candidates[0];
     return selected.strategy;
   }

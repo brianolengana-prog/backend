@@ -423,37 +423,27 @@ router.post('/upload', smartRateLimit('fileUpload'), upload.single('file'), asyn
         const useNewExtraction = featureFlags.isEnabledForUser('USE_NEW_EXTRACTION', userId);
         
         if (useNewExtraction) {
-          domainLogger.info('🎯 Using new ExtractionService', {
+          domainLogger.info('🎯 Using new ExtractionService with automatic strategy selection', {
             userId,
-            fileName: req.file.originalname,
-            preferredStrategy: parsedOptions.preferredStrategy || 'auto'
+            fileName: req.file.originalname
           });
 
           try {
-            // Map extractionMethod to preferredStrategy
-            let preferredStrategy = parsedOptions.preferredStrategy;
-            if (!preferredStrategy && extractionMethod) {
-              // Map old extractionMethod to new strategy names
-              if (extractionMethod === 'pattern' || extractionMethod === 'pattern-based') {
-                preferredStrategy = 'pattern';
-              } else if (extractionMethod === 'ai' || extractionMethod === 'ai-powered') {
-                preferredStrategy = 'ai';
-              } else {
-                preferredStrategy = 'auto'; // Let factory decide
-              }
-            }
-
             // Create ExtractionService instance
             const extractionService = new ExtractionService();
             
-            // Extract contacts using new service
+            // Extract contacts using new service with automatic strategy selection
+            // The factory will automatically select the best strategy based on document analysis
+            // No manual strategy selection - we hide complexity from users
             const extractionResult = await extractionService.extractContacts(
               req.file.buffer,
               req.file.mimetype,
               req.file.originalname,
               {
                 userId,
-                preferredStrategy: preferredStrategy || 'auto',
+                // Always use auto-selection - let the system choose the best strategy
+                // preferFast: true,  // Prefer fast strategies when possible
+                // preferFree: true,  // Prefer free strategies when possible
                 rolePreferences: rolePreferences ? (typeof rolePreferences === 'string' ? JSON.parse(rolePreferences) : rolePreferences) : undefined,
                 ...parsedOptions,
                 extractionId: `new_${Date.now()}`
