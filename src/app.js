@@ -25,6 +25,7 @@ const dashboardOptimizedRoutes = require('./routes/dashboard-optimized.routes');
 const upgradeWorkflowRoutes = require('./routes/upgradeWorkflow.routes');
 const contactsRoutes = require('./routes/contacts.routes');
 const supportRoutes = require('./routes/support.routes');
+const extractionV2Routes = require('./routes/extraction-v2.routes');
 
 const app = express();
 
@@ -102,6 +103,7 @@ app.use('/api/billing', billingLimiter, billingRoutes);
 app.use('/api/stripe', billingLimiter, stripeRoutes);
 app.use('/api/extraction', extractionLimiter, extractionRoutes);
 app.use('/api/extraction', textExtractionRoutes); // Text processing routes
+app.use('/api/extraction/v2', extractionLimiter, extractionV2Routes); // New architecture routes (testing)
 app.use('/api/jobs', jobsRoutes);
 app.use('/api/usage', usageRoutes);
 app.use('/api/dashboard', dashboardRoutes);
