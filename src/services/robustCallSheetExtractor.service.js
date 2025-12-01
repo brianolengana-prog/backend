@@ -182,6 +182,49 @@ class RobustCallSheetExtractor {
 
       // Medium-confidence patterns (semi-structured)
       semiStructured: [
+        // ✅ NEW: Pattern 0a: All-caps ROLE (no colon) on one line, Name / Email on next line (Sunday Times style)
+        // Handles optional blank lines between role and contact info
+        {
+          name: 'role_no_colon_name_email_slash',
+          regex: /^([A-Z][A-Z\s&\/\-]{2,})\s*\n\s*\n?\s*([A-Za-z\s\-'\.]+)\s*\/\s*([^\s\/]+@[^\s\/]+)\s*$/gmi,
+          groups: ['role', 'name', 'email'],
+          confidence: 0.95
+        },
+        // ✅ NEW: Pattern 0b: All-caps ROLE (no colon) on one line, Name / Phone / Email on next line
+        {
+          name: 'role_no_colon_name_phone_email_slash',
+          regex: /^([A-Z][A-Z\s&\/\-]{2,})\s*\n\s*\n?\s*([A-Za-z\s\-'\.]+)\s*\/\s*(\(?[\d\s\-\(\)\.\+]{8,}\)?)\s*\/\s*([^\s\/]+@[^\s\/]+)\s*$/gmi,
+          groups: ['role', 'name', 'phone', 'email'],
+          confidence: 0.97
+        },
+        // ✅ NEW: Pattern 0c: All-caps ROLE (no colon) on one line, Name / Phone on next line
+        {
+          name: 'role_no_colon_name_phone_slash',
+          regex: /^([A-Z][A-Z\s&\/\-]{2,})\s*\n\s*\n?\s*([A-Za-z\s\-'\.]+)\s*\/\s*(\(?[\d\s\-\(\)\.\+]{8,}\)?)\s*$/gmi,
+          groups: ['role', 'name', 'phone'],
+          confidence: 0.93
+        },
+        // ✅ NEW: Pattern 0d: All-caps ROLE (no colon) on one line, Name / Email / Phone on next line (different order)
+        {
+          name: 'role_no_colon_name_email_phone_slash',
+          regex: /^([A-Z][A-Z\s&\/\-]{2,})\s*\n\s*\n?\s*([A-Za-z\s\-'\.]+)\s*\/\s*([^\s\/]+@[^\s\/]+)\s*\/\s*(\(?[\d\s\-\(\)\.\+]{8,}\)?)\s*$/gmi,
+          groups: ['role', 'name', 'email', 'phone'],
+          confidence: 0.96
+        },
+        // ✅ NEW: Pattern 0e: C/O Agent Name / Phone / Email (agent lines)
+        {
+          name: 'agent_name_phone_email_slash',
+          regex: /^C\/O\s+([A-Za-z\s\-'\.]+)\s*\/\s*(\(?[\d\s\-\(\)\.\+]{8,}\)?)\s*\/\s*([^\s\/]+@[^\s\/]+)\s*$/gmi,
+          groups: ['name', 'phone', 'email'],
+          confidence: 0.94
+        },
+        // ✅ NEW: Pattern 0f: C/O Agent Name / Email (agent lines without phone)
+        {
+          name: 'agent_name_email_slash',
+          regex: /^C\/O\s+([A-Za-z\s\-'\.]+)\s*\/\s*([^\s\/]+@[^\s\/]+)\s*$/gmi,
+          groups: ['name', 'email'],
+          confidence: 0.92
+        },
         // ✅ NEW: Pattern 5a: Multi-line ROLE: followed by Name | email | c. phone on next line
         {
           name: 'multiline_role_name_email_phone_pipe',
@@ -277,6 +320,51 @@ class RobustCallSheetExtractor {
           name: 'production_section',
           regex: /PRODUCTION:\s*\n([\s\S]*?)(?=\n[A-Z]+\s*:|$)/gm,
           section: 'production'
+        },
+        // ✅ NEW: Pattern 15: POSITION section (table format)
+        {
+          name: 'position_section_table',
+          regex: /POSITION\s*\n\s*NAME\s*\n\s*EMAIL\s*\n\s*CELL\s*\n\s*CALL\s*\n\s*WRAP\s*\n\s*LOCATION\s*\n([\s\S]*?)(?=\n\s*[A-Z]+\s*\n|$)/gmi,
+          section: 'position'
+        },
+        // ✅ NEW: Pattern 16: TALENT section (table format)
+        {
+          name: 'talent_section_table',
+          regex: /TALENT\s*\n\s*NAME\s*\n\s*EMAIL\s*\n\s*CELL\s*\n\s*CALL\s*\n\s*WRAP\s*\n\s*LOCATION\s*\n([\s\S]*?)(?=\n\s*[A-Z]+\s*\n|$)/gmi,
+          section: 'talent'
+        }
+      ],
+      
+      // ✅ NEW: Table row patterns (for structured table formats)
+      tableRows: [
+        // Pattern 1: Table row with POSITION, NAME, EMAIL, CELL (phone) columns
+        // Format: Role\nName\nEmail\nPhone\n...
+        {
+          name: 'table_row_position_name_email_cell',
+          regex: /^([A-Za-z\/\s]+)\s*\n\s*([A-Za-z\s\-'\.]+)\s*\n\s*([^\s\n]+@[^\s\n]+)\s*\n\s*([\d\s\-\(\)\.]{8,})\s*$/gmi,
+          groups: ['role', 'name', 'email', 'phone'],
+          confidence: 0.95
+        },
+        // Pattern 2: Table row with NAME, EMAIL, CELL (no position/role)
+        {
+          name: 'table_row_name_email_cell',
+          regex: /^([A-Za-z\s\-'\.]+)\s*\n\s*([^\s\n]+@[^\s\n]+)\s*\n\s*([\d\s\-\(\)\.]{8,})\s*$/gmi,
+          groups: ['name', 'email', 'phone'],
+          confidence: 0.9
+        },
+        // Pattern 3: Table row with POSITION, NAME, EMAIL (no phone)
+        {
+          name: 'table_row_position_name_email',
+          regex: /^([A-Za-z\/\s]+)\s*\n\s*([A-Za-z\s\-'\.]+)\s*\n\s*([^\s\n]+@[^\s\n]+)\s*$/gmi,
+          groups: ['role', 'name', 'email'],
+          confidence: 0.85
+        },
+        // Pattern 4: Table row with POSITION, NAME, CELL (no email)
+        {
+          name: 'table_row_position_name_cell',
+          regex: /^([A-Za-z\/\s]+)\s*\n\s*([A-Za-z\s\-'\.]+)\s*\n\s*([\d\s\-\(\)\.]{8,})\s*$/gmi,
+          groups: ['role', 'name', 'phone'],
+          confidence: 0.85
         }
       ]
     };
@@ -316,18 +404,22 @@ class RobustCallSheetExtractor {
       // Step 1: Extract by sections first (if identifiable)
       const sectionResults = this.extractBySections(text, extractionId);
       
-      // Step 2: Extract with structured patterns
+      // Step 2: Extract table rows (for tabular formats)
+      const tableResults = this.extractTableRows(text, extractionId);
+      
+      // Step 3: Extract with structured patterns
       const structuredResults = this.extractWithPatterns(text, this.patterns.structured, 'structured', extractionId);
       
-      // Step 3: Extract with semi-structured patterns
+      // Step 4: Extract with semi-structured patterns
       const semiStructuredResults = this.extractWithPatterns(text, this.patterns.semiStructured, 'semi-structured', extractionId);
       
-      // Step 4: Extract with unstructured patterns (fallback)
+      // Step 5: Extract with unstructured patterns (fallback)
       const unstructuredResults = this.extractWithPatterns(text, this.patterns.unstructured, 'unstructured', extractionId);
       
-      // Step 5: Merge and deduplicate results
+      // Step 6: Merge and deduplicate results
       const allContacts = [
         ...sectionResults.contacts,
+        ...tableResults.contacts,
         ...structuredResults.contacts,
         ...semiStructuredResults.contacts,
         ...unstructuredResults.contacts
@@ -335,8 +427,11 @@ class RobustCallSheetExtractor {
 
       const uniqueContacts = this.deduplicateContacts(allContacts);
       
-      // Step 6: Normalize roles and clean data
-      const normalizedContacts = this.normalizeContacts(uniqueContacts);
+      // Step 6: Post-process to associate roles from previous lines
+      const contactsWithRoles = this.postProcessContacts(uniqueContacts, text);
+      
+      // Step 7: Normalize roles and clean data
+      const normalizedContacts = this.normalizeContacts(contactsWithRoles);
 
       const processingTime = Date.now() - startTime;
 
@@ -348,7 +443,8 @@ class RobustCallSheetExtractor {
           structured: structuredResults.count,
           semiStructured: semiStructuredResults.count,
           unstructured: unstructuredResults.count,
-          sections: sectionResults.count
+          sections: sectionResults.count,
+          tableRows: tableResults.count
         }
       });
 
@@ -364,7 +460,8 @@ class RobustCallSheetExtractor {
             structured: structuredResults.count,
             semiStructured: semiStructuredResults.count,
             unstructured: unstructuredResults.count,
-            sections: sectionResults.count
+            sections: sectionResults.count,
+            tableRows: tableResults.count
           }
         },
         processingTime,
@@ -389,6 +486,180 @@ class RobustCallSheetExtractor {
         errors: [error.message]
       };
     }
+  }
+
+  /**
+   * Extract table rows from tabular call sheet formats
+   * Handles formats where each column is on a separate line
+   * Format: POSITION\nNAME\nEMAIL\nCELL\n... (each field on its own line)
+   */
+  extractTableRows(text, extractionId) {
+    const contacts = [];
+    const lines = text.split('\n');
+    
+    // Look for table sections with headers
+    let inTableSection = false;
+    let tableHeaders = [];
+    let currentRow = {};
+    let rowIndex = 0;
+    let sectionRole = null;
+    let dataStartIndex = -1;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      const lineUpper = line.toUpperCase();
+      
+      // Detect table section start - POSITION can be both section and column header
+      if (lineUpper === 'POSITION' || lineUpper === 'TALENT' || lineUpper.includes('CLIENT')) {
+        inTableSection = true;
+        tableHeaders = [];
+        currentRow = {};
+        rowIndex = 0;
+        sectionRole = lineUpper.replace(/\/.*/, '').trim();
+        dataStartIndex = -1;
+        
+        // Look ahead for column headers (POSITION might be first column header)
+        const expectedHeaders = ['POSITION', 'NAME', 'EMAIL', 'CELL', 'CALL', 'WRAP', 'LOCATION'];
+        let headerCount = 0;
+        let foundPositionHeader = false;
+        
+        // Start from current line (POSITION might be first column header)
+        for (let j = i; j < Math.min(i + 20, lines.length); j++) {
+          const headerLine = lines[j].trim().toUpperCase();
+          
+          // Check if this is a column header
+          if (expectedHeaders.includes(headerLine)) {
+            if (!tableHeaders.includes(headerLine)) { // Avoid duplicates
+              tableHeaders.push(headerLine);
+              headerCount++;
+            }
+            if (headerLine === 'POSITION') {
+              foundPositionHeader = true;
+            }
+          } else if (headerCount >= 3 && headerLine.length === 0) {
+            // Blank line after headers - data starts next
+            dataStartIndex = j + 1;
+            break;
+          } else if (headerCount >= 3 && headerLine.length > 0 && 
+                     !headerLine.includes('@') && 
+                     !/[\d\s\-\(\)\.]{8,}/.test(headerLine)) {
+            // Non-blank line that doesn't look like data - might be new section
+            if (headerCount >= 3) {
+              dataStartIndex = j;
+              break;
+            }
+          }
+        }
+        
+        if (dataStartIndex > 0 && tableHeaders.length >= 3) {
+          i = dataStartIndex - 1;
+        } else if (tableHeaders.length < 3) {
+          // Didn't find enough headers, reset
+          inTableSection = false;
+        }
+        continue;
+      }
+      
+      // Parse table rows
+      if (inTableSection && tableHeaders.length > 0 && i >= dataStartIndex) {
+        const columnIndex = rowIndex % tableHeaders.length;
+        const header = tableHeaders[columnIndex];
+        
+        // Map header to contact field
+        if (header === 'POSITION' && line.length > 0 && 
+            !line.includes('@') && 
+            !/[\d\s\-\(\)\.]{8,}/.test(line) &&
+            line.length < 50) { // Reasonable role length
+          currentRow.role = line;
+        } else if (header === 'NAME' && line.length > 0 && 
+                   !line.includes('@') && 
+                   !/[\d\s\-\(\)\.]{8,}/.test(line) &&
+                   line.length < 100) { // Reasonable name length
+          // New row starting - save previous if valid
+          if (rowIndex > 0 && rowIndex % tableHeaders.length === 0 && currentRow.name) {
+            if (currentRow.name && (currentRow.email || currentRow.phone)) {
+              const contact = {
+                name: currentRow.name,
+                role: currentRow.role || sectionRole || 'Contact',
+                email: currentRow.email || '',
+                phone: currentRow.phone || '',
+                source: 'table-rows',
+                patternName: 'table_row_parsed',
+                confidence: 0.9
+              };
+              
+              if (this.isValidContact(contact)) {
+                contacts.push(contact);
+                logger.debug('✅ Extracted table row contact', {
+                  extractionId,
+                  contact: contact.name,
+                  role: contact.role,
+                  email: contact.email,
+                  phone: contact.phone
+                });
+              }
+            }
+            currentRow = {};
+          }
+          currentRow.name = line;
+        } else if (header === 'EMAIL' && line.includes('@')) {
+          currentRow.email = line.toLowerCase().trim();
+        } else if (header === 'CELL' && /[\d\s\-\(\)\.]{8,}/.test(line)) {
+          currentRow.phone = this.cleanPhoneNumber(line);
+        }
+        
+        rowIndex++;
+        
+        // Check if we've completed a full row
+        if (rowIndex > 0 && rowIndex % tableHeaders.length === 0) {
+          if (currentRow.name && (currentRow.email || currentRow.phone)) {
+            const contact = {
+              name: currentRow.name,
+              role: currentRow.role || sectionRole || 'Contact',
+              email: currentRow.email || '',
+              phone: currentRow.phone || '',
+              source: 'table-rows',
+              patternName: 'table_row_parsed',
+              confidence: 0.9
+            };
+            
+            if (this.isValidContact(contact)) {
+              contacts.push(contact);
+            }
+          }
+          currentRow = {};
+        }
+        
+        // Exit table section if we hit a new major section
+        if (lineUpper.match(/^[A-Z\s]{3,}$/) && !expectedHeaders.includes(lineUpper) && lineUpper !== sectionRole) {
+          inTableSection = false;
+        }
+      }
+    }
+    
+    // Don't forget the last row
+    if (currentRow.name && (currentRow.email || currentRow.phone)) {
+      const contact = {
+        name: currentRow.name,
+        role: currentRow.role || sectionRole || 'Contact',
+        email: currentRow.email || '',
+        phone: currentRow.phone || '',
+        source: 'table-rows',
+        patternName: 'table_row_parsed',
+        confidence: 0.9
+      };
+      
+      if (this.isValidContact(contact)) {
+        contacts.push(contact);
+      }
+    }
+    
+    logger.info('✅ Table row extraction complete', {
+      extractionId,
+      contactsFound: contacts.length
+    });
+    
+    return { contacts, count: contacts.length };
   }
 
   /**
@@ -664,6 +935,92 @@ class RobustCallSheetExtractor {
     
     // Return original if no match found
     return role;
+  }
+
+  /**
+   * Post-process contacts to associate roles from previous lines
+   * Handles formats like:
+   *   ROLE (all caps, no colon)
+   *   Name / Email / Phone
+   */
+  postProcessContacts(contacts, text) {
+    if (!text || contacts.length === 0) return contacts;
+
+    const lines = text.split('\n');
+    const processedContacts = [...contacts];
+    
+    // Track role context as we scan lines
+    let currentRole = null;
+    const roleLineIndices = new Map(); // Map role to line index
+    
+    // First pass: Identify role lines and their positions
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      // Check if this line is a role (all caps, 2+ words, no colon, not an email/phone)
+      if (line.length > 3 && 
+          line === line.toUpperCase() && 
+          !line.includes(':') && 
+          !line.includes('@') && 
+          !/[\d\s\-\(\)\.]{8,}/.test(line) &&
+          line.split(/\s+/).length >= 1) {
+        
+        // Check if it looks like a role (not a date, location, etc.)
+        const roleKeywords = ['DIRECTOR', 'PRODUCER', 'PHOTOGRAPHER', 'STYLIST', 'MUA', 'HAIR', 
+                             'MAKEUP', 'ASSISTANT', 'EDITOR', 'TALENT', 'AGENT', 'PUBLICIST',
+                             'MANAGER', 'COORDINATOR', 'TECH', 'GAFFER', 'GRIP'];
+        
+        if (roleKeywords.some(keyword => line.includes(keyword))) {
+          currentRole = line;
+          roleLineIndices.set(i, currentRole);
+        }
+      }
+      
+      // Reset role if we hit a blank line or a new section
+      if (line.length === 0 && currentRole) {
+        // Keep role for a few lines after blank line
+        // (in case contact info is on next line)
+      }
+    }
+    
+    // Second pass: Associate roles with contacts that don't have roles
+    // Match contacts to lines by name/email/phone
+    for (const contact of processedContacts) {
+      if (!contact.role || contact.role === 'Contact' || contact.role === 'Unknown') {
+        // Try to find this contact's line in the text
+        const contactName = contact.name?.toLowerCase();
+        const contactEmail = contact.email?.toLowerCase();
+        const contactPhone = contact.phone?.replace(/\D/g, '');
+        
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].toLowerCase();
+          
+          // Check if this line contains the contact's name, email, or phone
+          const nameMatch = contactName && line.includes(contactName);
+          const emailMatch = contactEmail && line.includes(contactEmail);
+          const phoneMatch = contactPhone && line.includes(contactPhone.replace(/\D/g, ''));
+          
+          if (nameMatch || emailMatch || phoneMatch) {
+            // Look backwards for the most recent role (within 5 lines)
+            for (let j = Math.max(0, i - 5); j < i; j++) {
+              if (roleLineIndices.has(j)) {
+                contact.role = roleLineIndices.get(j);
+                logger.debug('✅ Associated role from previous line', {
+                  contact: contact.name,
+                  role: contact.role,
+                  lineIndex: i,
+                  roleLineIndex: j
+                });
+                break;
+              }
+            }
+            break;
+          }
+        }
+      }
+    }
+    
+    return processedContacts;
   }
 
   /**
