@@ -194,17 +194,17 @@ class ContactsService {
         ...(requireContact === 'true' && {
           OR: [
             { 
-              AND: [
-                { email: { not: null } },
-                { email: { not: '' } },
-                { email: { contains: '@' } }
-              ]
+              email: { 
+                not: null,
+                not: '',
+                contains: '@'
+              }
             },
             {
-              AND: [
-                { phone: { not: null } },
-                { phone: { not: '' } }
-              ]
+              phone: { 
+                not: null,
+                not: ''
+              }
             }
           ]
         })
@@ -243,6 +243,60 @@ class ContactsService {
       const totalPages = Math.ceil(total / limit);
       const hasMore = page < totalPages;
 
+      // ✅ Calculate stats for the filtered dataset (enterprise-grade performance)
+      // Use the same WHERE clause to get accurate stats for the current filter context
+      const statsWhere = {
+        userId,
+        ...(search && {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { email: { contains: search, mode: 'insensitive' } },
+            { phone: { contains: search, mode: 'insensitive' } },
+            { role: { contains: search, mode: 'insensitive' } },
+            { company: { contains: search, mode: 'insensitive' } }
+          ]
+        }),
+        ...(role && role !== 'all' && { role: { contains: role, mode: 'insensitive' } }),
+        ...(jobId && jobId !== 'all' && { jobId })
+      };
+
+      const [contactsWithEmail, contactsWithPhone, totalJobs] = await Promise.all([
+        prisma.contact.count({
+          where: {
+            ...statsWhere,
+            email: { 
+              not: null,
+              contains: '@'
+            }
+          }
+        }),
+        prisma.contact.count({
+          where: {
+            ...statsWhere,
+            phone: { 
+              not: null,
+              not: ''
+            }
+          }
+        }),
+        prisma.job.count({
+          where: {
+            userId,
+            ...(jobId && jobId !== 'all' && { id: jobId }),
+            contacts: {
+              some: {}
+            }
+          }
+        })
+      ]);
+
+      const stats = {
+        totalContacts: total,
+        withEmail: contactsWithEmail,
+        withPhone: contactsWithPhone,
+        totalJobs: totalJobs || 0
+      };
+
       const result = {
         contacts: normalizedContacts,
         pagination: {
@@ -251,10 +305,18 @@ class ContactsService {
           total,
           totalPages,
           hasMore
-        }
+        },
+        stats
       };
 
-      console.log(`✅ Returning ${normalizedContacts.length} of ${total} contacts (page ${page}/${totalPages})`);
+      console.log(`✅ Returning ${normalizedContacts.length} of ${total} contacts (page ${page}/${totalPages})`, {
+        stats: {
+          total: stats.totalContacts,
+          withEmail: stats.withEmail,
+          withPhone: stats.withPhone,
+          totalJobs: stats.totalJobs
+        }
+      });
       return result;
     } catch (error) {
       console.error('❌ Error getting paginated contacts:', error);
