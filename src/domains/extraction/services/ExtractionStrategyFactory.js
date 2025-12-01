@@ -270,6 +270,98 @@ class ExtractionStrategyFactory {
 
     return reasons.join('. ');
   }
+
+  /**
+   * Get health status of all strategies
+   * Returns information about available strategies for API consumption
+   * 
+   * @returns {Promise<object>} Health status with strategy information
+   */
+  async getHealthStatus() {
+    const { logger } = require('../../../shared/infrastructure/logger/logger.service');
+    
+    try {
+      const strategies = {};
+      let availableCount = 0;
+
+      // Get pattern strategy status
+      try {
+        const patternStrategy = this._getPatternStrategy();
+        const patternHealth = patternStrategy.getHealthStatus ? 
+          patternStrategy.getHealthStatus() : 
+          { name: patternStrategy.getName(), available: true, confidence: 0.95 };
+        
+        strategies.pattern = {
+          id: 'pattern',
+          name: patternHealth.name || 'PatternExtractionStrategy',
+          description: 'Fast pattern-based extraction using regex patterns. Best for structured call sheets. No external API required.',
+          confidence: patternHealth.confidence || 0.95,
+          available: patternHealth.available !== false,
+          estimatedCost: 0.00,
+          estimatedTime: 500,
+          cost: 'free',
+          speed: 'fast'
+        };
+        
+        if (strategies.pattern.available) availableCount++;
+      } catch (error) {
+        logger.warn('Pattern strategy health check failed', { error: error.message });
+        strategies.pattern = {
+          id: 'pattern',
+          name: 'PatternExtractionStrategy',
+          available: false,
+          error: error.message
+        };
+      }
+
+      // Get AI strategy status
+      try {
+        const aiStrategy = this._getAIStrategy();
+        const aiAvailable = await aiStrategy.isAvailable();
+        const aiHealth = aiStrategy.getHealthStatus ? 
+          aiStrategy.getHealthStatus() : 
+          { name: aiStrategy.getName(), available: aiAvailable, confidence: 0.96 };
+        
+        strategies.ai = {
+          id: 'ai',
+          name: aiHealth.name || 'AIExtractionStrategy',
+          description: 'Advanced AI-powered extraction using GPT-4o Mini. Best for complex or unstructured documents.',
+          confidence: aiHealth.confidence || 0.96,
+          available: aiHealth.available !== false && aiAvailable,
+          estimatedCost: 0.10, // Average cost per extraction
+          estimatedTime: 5000,
+          cost: 'variable',
+          speed: 'medium'
+        };
+        
+        if (strategies.ai.available) availableCount++;
+      } catch (error) {
+        logger.warn('AI strategy health check failed', { error: error.message });
+        strategies.ai = {
+          id: 'ai',
+          name: 'AIExtractionStrategy',
+          available: false,
+          error: error.message
+        };
+      }
+
+      return {
+        initialized: true,
+        strategies,
+        availableCount,
+        totalCount: Object.keys(strategies).length
+      };
+    } catch (error) {
+      logger.error('Strategy factory health check failed', { error: error.message, stack: error.stack });
+      return {
+        initialized: false,
+        strategies: {},
+        availableCount: 0,
+        totalCount: 0,
+        error: error.message
+      };
+    }
+  }
 }
 
 module.exports = ExtractionStrategyFactory;

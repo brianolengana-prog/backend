@@ -67,6 +67,62 @@ const migrationService = ExtractionMigrationService;
 // All extraction routes require authentication
 router.use(authenticateToken);
 
+// ============================================================
+// NEW: Strategy API Endpoint (Phase 2 Integration)
+// Exposes available extraction strategies to frontend
+// ============================================================
+const ExtractionStrategyFactory = require('../domains/extraction/services/ExtractionStrategyFactory');
+const { logger: domainLogger } = require('../shared/infrastructure/logger/logger.service');
+
+/**
+ * GET /api/extraction/strategies
+ * Get available extraction strategies with metadata
+ * 
+ * Returns information about available strategies including:
+ * - Strategy ID and name
+ * - Description and capabilities
+ * - Confidence scores
+ * - Availability status
+ * - Estimated cost and processing time
+ */
+router.get('/strategies', asyncHandler(async (req, res) => {
+  try {
+    const factory = new ExtractionStrategyFactory();
+    const healthStatus = await factory.getHealthStatus();
+    
+    // Transform to API-friendly format
+    const strategies = Object.values(healthStatus.strategies).map(strategy => ({
+      id: strategy.id,
+      name: strategy.name,
+      description: strategy.description || '',
+      confidence: strategy.confidence,
+      available: strategy.available,
+      estimatedCost: strategy.estimatedCost,
+      estimatedTime: strategy.estimatedTime,
+      cost: strategy.cost,
+      speed: strategy.speed,
+      ...(strategy.error && { error: strategy.error })
+    }));
+
+    res.json({
+      success: true,
+      strategies,
+      summary: {
+        total: healthStatus.totalCount,
+        available: healthStatus.availableCount,
+        initialized: healthStatus.initialized
+      }
+    });
+  } catch (error) {
+    domainLogger.error('Failed to get extraction strategies', { error: error.message, stack: error.stack });
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve extraction strategies',
+      details: error.message
+    });
+  }
+}));
+
 // Configure multer for file uploads (using memory storage for better performance)
 
 const upload = multer({
