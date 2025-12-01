@@ -83,31 +83,45 @@ class OptimizedHybridExtractionService {
 
       let aiUsed = false;
 
-      // Step 3: AI enhancement based on QUALITY not just quantity
+      // Step 3: AI enhancement based on QUALITY and MESSY DATA detection
       const needsAIEnhancement = this.shouldUseAI(finalContacts, confidenceScore);
+      const hasMessyData = this.hasMessyContacts(finalContacts);
       
-      if (needsAIEnhancement && this.isAIAvailable) {
-        const reason = qualityScore < 0.5 ? 'low_quality_contacts' : 
+      // ✅ NEW: Always use AI if contacts are messy, even if quality score is high
+      if ((needsAIEnhancement || hasMessyData) && this.isAIAvailable) {
+        const reason = hasMessyData ? 'messy_contact_data' :
+                       qualityScore < 0.5 ? 'low_quality_contacts' : 
                        finalContacts.length < 5 ? 'few_contacts' : 
                        qualityScore < 0.6 ? 'incomplete_data' : 'low_confidence';
         
         logger.info('🤖 Applying AI enhancement', { 
           extractionId,
           reason,
+          hasMessyData,
           qualityScore: qualityScore.toFixed(2),
           contactsWithEmail: qualityMetrics.withEmail,
           contactsWithPhone: qualityMetrics.withPhone
         });
         
         const aiResults = await this.enhanceWithAI(text, finalContacts, extractionId);
-        finalContacts = this.mergeContacts(finalContacts, aiResults);
+        
+        // ✅ NEW: If we detected messy data, prioritize AI results over pattern results
+        if (hasMessyData) {
+          // Merge with AI results taking precedence for name/role cleaning
+          finalContacts = this.mergeContactsWithAIPriority(finalContacts, aiResults);
+        } else {
+          // Standard merge (pattern results take precedence)
+          finalContacts = this.mergeContacts(finalContacts, aiResults);
+        }
+        
         aiUsed = true;
       } else {
         logger.info('✅ Skipping AI enhancement - quality sufficient', {
           extractionId,
           qualityScore: qualityScore.toFixed(2),
           contactCount: finalContacts.length,
-          completeProfiles: qualityMetrics.completeProfiles
+          completeProfiles: qualityMetrics.completeProfiles,
+          hasMessyData
         });
       }
 
@@ -375,17 +389,78 @@ class OptimizedHybridExtractionService {
   }
 
   /**
+   * Detect if contacts have messy/incorrect data that needs AI cleaning
+   */
+  hasMessyContacts(contacts) {
+    return contacts.some(contact => {
+      const name = (contact.name || '').trim();
+      const role = (contact.role || '').trim();
+      
+      // Check for common messy patterns
+      const hasPhoneInName = /^[\d\s\-\(\)\.]{8,}$/.test(name); // Phone number in name field
+      const hasMetadataInName = /\b(AM|PM|C|ST|ND|NAME|PHONE|EMAIL|CALL|TIME|NUMBER|POSITION)\b/i.test(name);
+      const hasMetadataInRole = /\b(NAME|PHONE|EMAIL|CALL|TIME|NUMBER|POSITION|SCHEDULE)\b/i.test(role);
+      const hasSingleLetterName = /^[A-Z]$/.test(name);
+      const hasNameInRole = role && role.length > 20 && /^[A-Z][a-z]+ [A-Z][a-z]+/.test(role); // "Tara Fraser Producer"
+      
+      return hasPhoneInName || hasMetadataInName || hasMetadataInRole || hasSingleLetterName || hasNameInRole;
+    });
+  }
+
+  /**
    * Build optimized AI prompt with context
    */
   buildOptimizedAIPrompt(text, existingContacts) {
     const existingNames = existingContacts.map(c => c.name || c.role).filter(Boolean);
+    const hasMessy = this.hasMessyContacts(existingContacts);
     
+    // Enhanced prompt for messy contacts
+    if (hasMessy) {
+      return `You are an expert at cleaning and normalizing contact information from production call sheets.
+
+EXISTING CONTACTS (may contain messy data):
+${JSON.stringify(existingContacts.slice(0, 30), null, 2)}
+
+DOCUMENT TEXT:
+${text.substring(0, 8000)}
+
+CRITICAL TASKS:
+1. CLEAN NAMES: Remove phone numbers, metadata (AM/PM/C/ST/ND/NAME/PHONE/EMAIL/CALL), single letters, and extract actual person names
+   - "A Tara Fraser Producer" → name: "Tara Fraser", role: "PRODUCER"
+   - "347-266-1510" with email "hello@winilao.com" → name: "Wini Lao" (infer from email/context)
+   - "585-737-8809" → extract name from context/email if available
+   - Remove prefixes like "AM", "PM", "C", "ST", "ND" from names
+
+2. EXTRACT NAMES FROM ROLES: If role contains a person name, move it to name field
+   - role: "AM CAMERA NAME NUMBER EMAIL CALL TIME Photographer Wini Lao" → name: "Wini Lao", role: "PHOTOGRAPHER"
+
+3. STANDARDIZE ROLES: Clean role field, remove metadata keywords
+   - Keep only standard roles: PRODUCER, DIRECTOR, PHOTOGRAPHER, STYLIST, MUA, ASSISTANT, etc.
+
+4. VALIDATE: Ensure email format is correct, phone numbers are properly formatted
+
+Return JSON format:
+{
+  "contacts": [
+    {
+      "name": "Clean Full Name (no metadata, no phone numbers)",
+      "role": "STANDARDIZED_ROLE",
+      "email": "email@example.com",
+      "phone": "(555) 123-4567"
+    }
+  ]
+}
+
+Return ALL contacts with cleaned data, not just new ones.`;
+    }
+    
+    // Standard prompt for finding new contacts
     return `Extract contact information from this production call sheet. Focus on finding contacts NOT already identified.
 
 EXISTING CONTACTS FOUND: ${existingNames.join(', ')}
 
 DOCUMENT TEXT:
-${text.substring(0, 8000)} // Limit text to optimize tokens
+${text.substring(0, 8000)}
 
 Return JSON format:
 {
@@ -409,7 +484,52 @@ Return empty array if no new contacts found.`;
   }
 
   /**
-   * Merge pattern and AI results
+   * Merge pattern and AI results (AI takes precedence for cleaning)
+   */
+  mergeContactsWithAIPriority(patternContacts, aiContacts) {
+    const merged = [];
+    const aiMap = new Map();
+    
+    // Index AI contacts by email/phone for matching
+    for (const aiContact of aiContacts) {
+      const key = aiContact.email || aiContact.phone || aiContact.name;
+      if (key) {
+        aiMap.set(key.toLowerCase(), aiContact);
+      }
+    }
+    
+    // Match pattern contacts with AI contacts and use AI-cleaned data
+    for (const patternContact of patternContacts) {
+      const key = (patternContact.email || patternContact.phone || patternContact.name || '').toLowerCase();
+      const aiMatch = aiMap.get(key);
+      
+      if (aiMatch) {
+        // Use AI-cleaned version (better name/role)
+        merged.push({
+          ...patternContact,
+          name: aiMatch.name || patternContact.name,
+          role: aiMatch.role || patternContact.role,
+          email: aiMatch.email || patternContact.email,
+          phone: aiMatch.phone || patternContact.phone,
+          company: aiMatch.company || patternContact.company
+        });
+        aiMap.delete(key); // Mark as used
+      } else {
+        // Keep pattern contact as-is
+        merged.push(patternContact);
+      }
+    }
+    
+    // Add any new AI contacts not in pattern results
+    for (const [key, aiContact] of aiMap.entries()) {
+      merged.push(aiContact);
+    }
+    
+    return merged;
+  }
+
+  /**
+   * Merge pattern and AI results (standard merge - pattern takes precedence)
    */
   mergeContacts(patternContacts, aiContacts) {
     const merged = [...patternContacts];
