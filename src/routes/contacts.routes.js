@@ -133,14 +133,30 @@ router.get('/:id', async (req, res) => {
 /**
  * GET /api/contacts/export
  * Export contacts to CSV format
+ * 
+ * Query parameters:
+ * - ids: Comma-separated contact IDs (optional)
+ * - jobId: Filter by job ID (optional)
+ * - format: Export format (default: 'csv')
  */
 router.get('/export', async (req, res) => {
   try {
-    const { ids, format = 'csv' } = req.query;
-    console.log(`📥 Exporting contacts for user: ${req.user.id}`, { format, ids });
+    const { ids, jobId, format = 'csv' } = req.query;
+    console.log(`📥 Exporting contacts for user: ${req.user.id}`, { format, ids, jobId });
+    
+    // Validate jobId is a valid UUID if provided
+    if (jobId) {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(jobId)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid jobId format. Must be a valid UUID.'
+        });
+      }
+    }
     
     const contactIds = ids ? ids.split(',') : undefined;
-    const { data, filename, mimeType } = await contactsService.exportContacts(req.user.id, contactIds, format);
+    const { data, filename, mimeType } = await contactsService.exportContacts(req.user.id, contactIds, format, jobId || null);
     
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

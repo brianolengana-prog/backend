@@ -416,14 +416,16 @@ class ContactsService {
   /**
    * Export contacts to CSV or other formats
    */
-  async exportContacts(userId, contactIds, format = 'csv') {
+  async exportContacts(userId, contactIds, format = 'csv', jobId = null) {
     try {
-      console.log(`📥 Exporting contacts for user: ${userId}`, { format, count: contactIds?.length || 'all' });
+      console.log(`📥 Exporting contacts for user: ${userId}`, { format, count: contactIds?.length || 'all', jobId });
 
       // Build query
       const where = {
         userId,
-        ...(contactIds && contactIds.length > 0 && { id: { in: contactIds } })
+        ...(contactIds && contactIds.length > 0 && { id: { in: contactIds } }),
+        // ✅ NEW: Support filtering by jobId
+        ...(jobId && { jobId })
       };
 
       // Fetch contacts
