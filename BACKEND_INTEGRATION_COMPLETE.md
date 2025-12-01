@@ -172,12 +172,23 @@ curl -X POST http://localhost:3001/api/extraction/upload \
 ### Immediate (Ready Now)
 1. **Enable Feature Flag** - Test with real users
 2. **Monitor Performance** - Compare old vs new
-3. **Frontend Integration** - Use strategy API
+3. **Frontend Integration** - Simple upload flow (no strategy selection)
 
 ### Short Term (Next Week)
-1. **Frontend Strategy Service** - Build unified service
-2. **Strategy Selector UI** - Let users choose
+1. **Frontend Unified Service** - Build clean extraction service
+2. **Remove Strategy UI** - No manual selection needed
 3. **Performance Optimization** - Optimize data flow
+
+## 🎯 UX Decision: Automatic Strategy Selection
+
+**Principle**: Hide complexity, show simplicity
+
+- ✅ System automatically selects best strategy
+- ✅ No strategy selection UI for users
+- ✅ Intelligent selection based on document analysis
+- ✅ Users just upload and get best results
+
+See `UX_DECISION_AUTO_STRATEGY.md` for details.
 
 ---
 
