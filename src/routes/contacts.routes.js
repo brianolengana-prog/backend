@@ -39,9 +39,14 @@ router.get('/stats', async (req, res) => {
     const service = getContactsService(userId);
     
     // STRICT: If jobId provided, get job-scoped stats
-    const stats = jobId && jobId !== 'all'
-      ? await service.contactService.getStats(userId, jobId)
-      : await service.getContactStats(userId);
+    let stats;
+    if (jobId && jobId !== 'all' && service.contactService) {
+      // New service with job-scoped stats
+      stats = await service.contactService.getStats(userId, jobId);
+    } else {
+      // Legacy service or no jobId
+      stats = await service.getContactStats(userId);
+    }
     
     res.json({ 
       success: true, 

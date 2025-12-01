@@ -146,12 +146,19 @@ class ContactRepository extends BaseRepository {
   /**
    * Find contacts by job ID
    * @param {string} jobId - Job ID
+   * @param {string} userId - Optional user ID for security filtering
    * @returns {Promise<Array>} Array of contacts (as entities)
    */
-  async findByJobId(jobId) {
-    logger.debug(`Finding contacts by job ID: ${jobId}`);
+  async findByJobId(jobId, userId = null) {
+    logger.debug(`Finding contacts by job ID: ${jobId}`, { userId });
+    
+    const where = { jobId };
+    if (userId) {
+      where.userId = userId; // Security: filter by user
+    }
+    
     const contacts = await this.model.findMany({
-      where: { jobId },
+      where,
       orderBy: { createdAt: 'asc' },
       include: {
         job: {

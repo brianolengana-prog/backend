@@ -101,11 +101,8 @@ class ContactService {
   async getJobScopedStats(userId, jobId) {
     logger.debug(`Getting job-scoped stats`, { userId, jobId });
 
-    // Get contacts for this job only
-    const jobContacts = await this.contactRepository.findByJobId(jobId);
-    
-    // Filter to user's contacts (security check)
-    const userJobContacts = jobContacts.filter(c => c.userId === userId);
+    // Get contacts for this job only (repository handles user filtering)
+    const jobContacts = await this.contactRepository.findByJobId(jobId, userId);
 
     // Validate and clean
     const { cleaned } = this.validationService.validateAndCleanContacts(userJobContacts, {
@@ -159,8 +156,9 @@ class ContactService {
 
     const stats = await this.contactRepository.getStats(userId);
 
-    // Get jobs with contacts
-    const jobsWithContacts = await this.contactRepository.model.findMany({
+    // Get jobs with contacts (need to access Prisma model)
+    const prisma = require('../../../shared/infrastructure/database/database.manager').DatabaseManager.getInstance().getClient();
+    const jobsWithContacts = await prisma.job.findMany({
       where: {
         userId,
         contacts: {
