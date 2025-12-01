@@ -91,12 +91,10 @@ class ExtractionStrategyFactory {
   /**
    * Select best strategy for document automatically
    * 
-   * Intelligent selection logic (hides complexity from users):
-   * 1. Check which strategies are available
-   * 2. Calculate confidence for each based on document characteristics
-   * 3. Prefer fast, free strategies when confidence is similar
-   * 4. Use AI for complex/unstructured documents when needed
-   * 5. Return best match automatically
+   * Matches current "hybrid" behavior from frontend:
+   * 1. Always try pattern first (fast, free, high confidence for call sheets)
+   * 2. Use AI only if pattern confidence is low or document is complex
+   * 3. This matches the current hybrid extraction logic
    * 
    * @param {object} documentAnalysis - Document analysis
    * @param {object} options - Selection options
@@ -118,60 +116,46 @@ class ExtractionStrategyFactory {
       throw new Error('No extraction strategies available');
     }
 
-    // Intelligent auto-selection logic
-    // Default: prefer fast and free when confidence is similar
-    const preferFast = options.preferFast !== false; // Default: true
-    const preferFree = options.preferFree !== false; // Default: true
+    const patternStrategy = availableStrategies.find(s => s.name.includes('Pattern'));
+    const aiStrategy = availableStrategies.find(s => s.name.includes('AI'));
 
-    // Filter candidates based on preferences
-    let candidates = availableStrategies;
+    // ============================================================
+    // HYBRID LOGIC: Matches current frontend behavior
+    // Frontend sends extractionMethod: 'hybrid' which means:
+    // - Try pattern first (fast, free)
+    // - Use AI if pattern confidence is low or document is complex
+    // ============================================================
 
-    // If document is a call sheet (structured), pattern extraction is usually best
-    if (documentAnalysis.type === 'call_sheet' || documentAnalysis.type === 'structured') {
-      // Prefer pattern for structured documents
-      const patternStrategy = candidates.find(s => s.name.includes('Pattern'));
-      if (patternStrategy && patternStrategy.confidence >= 0.8) {
+    // Default: Always start with pattern (matches hybrid behavior)
+    if (patternStrategy && patternStrategy.available) {
+      const patternConfidence = patternStrategy.confidence || 0.95;
+      
+      // Use pattern if confidence is good (>= 0.7 threshold, matching hybrid logic)
+      if (patternConfidence >= 0.7) {
         return patternStrategy.strategy;
       }
-    }
-
-    // If document is complex or unstructured, consider AI
-    if (documentAnalysis.complexity === 'high' || documentAnalysis.type === 'unknown') {
-      const aiStrategy = candidates.find(s => s.name.includes('AI'));
-      const patternStrategy = candidates.find(s => s.name.includes('Pattern'));
       
-      // Use AI if available and pattern confidence is low
-      if (aiStrategy && patternStrategy && patternStrategy.confidence < 0.7) {
-        return aiStrategy.strategy;
-      }
-    }
-
-    // Prefer fast strategies when confidence is similar
-    if (preferFast) {
-      const fastStrategies = candidates.filter(s => s.speed === 'fast');
-      if (fastStrategies.length > 0) {
-        // If fastest strategy has good confidence, use it
-        const bestFast = fastStrategies[0];
-        if (bestFast.confidence >= 0.8) {
-          return bestFast.strategy;
+      // If pattern confidence is low, check if we should use AI
+      if (aiStrategy && aiStrategy.available) {
+        // Use AI for complex documents or when pattern confidence is low
+        if (documentAnalysis.complexity === 'high' || 
+            documentAnalysis.type === 'unknown' ||
+            patternConfidence < 0.7) {
+          return aiStrategy.strategy;
         }
       }
+      
+      // Even if confidence is lower, still try pattern first (matches hybrid: try pattern, then AI)
+      return patternStrategy.strategy;
     }
 
-    // Prefer free strategies when confidence is similar
-    if (preferFree) {
-      const freeStrategies = candidates.filter(s => s.cost === 'free');
-      if (freeStrategies.length > 0) {
-        const bestFree = freeStrategies[0];
-        // Use free strategy if confidence is acceptable
-        if (bestFree.confidence >= 0.75) {
-          return bestFree.strategy;
-        }
-      }
+    // Fallback: Use AI if pattern not available
+    if (aiStrategy && aiStrategy.available) {
+      return aiStrategy.strategy;
     }
 
-    // Default: Select highest confidence strategy
-    const selected = candidates[0];
+    // Last resort: Use highest confidence strategy
+    const selected = availableStrategies[0];
     return selected.strategy;
   }
 
