@@ -72,7 +72,9 @@ router.use(authenticateToken);
 // Exposes available extraction strategies to frontend
 // ============================================================
 const ExtractionStrategyFactory = require('../domains/extraction/services/ExtractionStrategyFactory');
+const ExtractionService = require('../domains/extraction/services/ExtractionService');
 const { logger: domainLogger } = require('../shared/infrastructure/logger/logger.service');
+const featureFlags = require('../shared/infrastructure/features/feature-flags.service');
 
 /**
  * GET /api/extraction/strategies
@@ -415,7 +417,77 @@ router.post('/upload', smartRateLimit('fileUpload'), upload.single('file'), asyn
     const result = await concurrencyLimiter.execute(
       userId,
       async () => {
-        // Use migration service to route to appropriate extraction system
+        // ============================================================
+        // NEW: Use Phase 2 ExtractionService if feature flag enabled
+        // ============================================================
+        const useNewExtraction = featureFlags.isEnabledForUser('USE_NEW_EXTRACTION', userId);
+        
+        if (useNewExtraction) {
+          domainLogger.info('🎯 Using new ExtractionService', {
+            userId,
+            fileName: req.file.originalname,
+            preferredStrategy: parsedOptions.preferredStrategy || 'auto'
+          });
+
+          try {
+            // Map extractionMethod to preferredStrategy
+            let preferredStrategy = parsedOptions.preferredStrategy;
+            if (!preferredStrategy && extractionMethod) {
+              // Map old extractionMethod to new strategy names
+              if (extractionMethod === 'pattern' || extractionMethod === 'pattern-based') {
+                preferredStrategy = 'pattern';
+              } else if (extractionMethod === 'ai' || extractionMethod === 'ai-powered') {
+                preferredStrategy = 'ai';
+              } else {
+                preferredStrategy = 'auto'; // Let factory decide
+              }
+            }
+
+            // Create ExtractionService instance
+            const extractionService = new ExtractionService();
+            
+            // Extract contacts using new service
+            const extractionResult = await extractionService.extractContacts(
+              req.file.buffer,
+              req.file.mimetype,
+              req.file.originalname,
+              {
+                userId,
+                preferredStrategy: preferredStrategy || 'auto',
+                rolePreferences: rolePreferences ? (typeof rolePreferences === 'string' ? JSON.parse(rolePreferences) : rolePreferences) : undefined,
+                ...parsedOptions,
+                extractionId: `new_${Date.now()}`
+              }
+            );
+
+            // Convert ExtractionResult to legacy format for backward compatibility
+            if (extractionResult.isSuccessful()) {
+              return {
+                success: true,
+                contacts: extractionResult.contacts || [],
+                metadata: {
+                  ...extractionResult.metadata,
+                  strategy: extractionResult.strategy,
+                  confidence: extractionResult.confidence,
+                  processingTime: extractionResult.processingTime,
+                  extractionId: extractionResult.metadata?.extractionId
+                }
+              };
+            } else {
+              throw new Error(extractionResult.error || 'Extraction failed');
+            }
+          } catch (newServiceError) {
+            domainLogger.error('❌ New ExtractionService failed, falling back to legacy', {
+              error: newServiceError.message,
+              stack: newServiceError.stack,
+              userId,
+              fileName: req.file.originalname
+            });
+            // Fall through to legacy service
+          }
+        }
+
+        // Legacy extraction service (fallback or if feature flag disabled)
         const extractionPromise = migrationService.extractContacts(extractedText, {
           userId,
           fileName: req.file.originalname,
