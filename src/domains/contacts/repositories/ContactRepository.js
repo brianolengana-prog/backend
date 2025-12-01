@@ -1,37 +1,59 @@
 const BaseRepository = require('../../../shared/infrastructure/database/base.repository');
-const databaseManager = require('../../../shared/infrastructure/database/database.manager');
+const { DatabaseManager } = require('../../../shared/infrastructure/database/database.manager');
+const { Contact } = require('../entities/Contact');
+const { logger } = require('../../../shared/infrastructure/logger/logger.service');
 
 /**
  * Contact Repository
- * Handles all data access for contacts
+ * Handles all data access for contacts using the repository pattern
  * 
- * Example implementation of domain repository using BaseRepository
+ * Best Practice: Repository abstracts data access from business logic
  */
 class ContactRepository extends BaseRepository {
   constructor() {
-    // Initialize with model name
-    // Prisma client will be set via initializePrisma
-    super('contact', null);
-    this.initializePrisma();
+    const prisma = DatabaseManager.getInstance().getClient();
+    super(prisma.contact, prisma);
+    logger.info('ContactRepository initialized');
   }
 
   /**
-   * Initialize Prisma client from database manager
-   * @private
+   * Converts Prisma Contact model to Contact entity
+   * @param {object} prismaContact - Prisma Contact model
+   * @returns {Contact|null}
    */
-  async initializePrisma() {
-    this.prisma = await databaseManager.getClient();
-    this.model = this.prisma.contact;
+  _toEntity(prismaContact) {
+    if (!prismaContact) return null;
+    return Contact.fromPrisma(prismaContact);
   }
 
   /**
-   * Find contacts by user ID with pagination
+   * Converts Contact entity to Prisma data format
+   * @param {Contact} entity - Contact entity
+   * @returns {object}
+   */
+  _toPrismaData(entity) {
+    return {
+      userId: entity.userId,
+      jobId: entity.jobId,
+      name: entity.name,
+      email: entity.email,
+      phone: entity.phone,
+      role: entity.role,
+      company: entity.company,
+      isSelected: entity.isSelected,
+      createdAt: entity.createdAt,
+      updatedAt: entity.updatedAt
+    };
+  }
+
+  /**
+   * Find contacts by user ID with pagination and filtering
    * @param {string} userId - User ID
    * @param {object} options - Query options
-   * @returns {Promise<object>} Contacts and pagination info
+   * @returns {Promise<object>} Contacts (as entities) and pagination info
    */
   async findByUserId(userId, options = {}) {
-    await this.initializePrisma();
+    logger.debug(`Finding contacts for user: ${userId}`, options);
     
     const {
       page = 1,
@@ -44,48 +66,79 @@ class ContactRepository extends BaseRepository {
       requireContact = true
     } = options;
 
+    // Build where clause
     const where = {
       userId,
-      ...(jobId && { jobId }),
-      ...(role && { role: { contains: role, mode: 'insensitive' } }),
-      ...(requireContact && {
+      ...(jobId && jobId !== 'all' && { jobId }),
+      ...(role && role !== 'all' && { role: { contains: role, mode: 'insensitive' } }),
+      ...(requireContact === true || requireContact === 'true' ? {
         OR: [
-          { email: { not: null } },
-          { phone: { not: null } }
+          { email: { not: null, not: '', contains: '@' } },
+          { phone: { not: null, not: '' } }
         ]
-      })
+      } : {})
     };
 
-    // Add search filter
+    // Add search filter (combines with requireContact OR if present)
     if (search) {
-      where.OR = [
-        ...(where.OR || []),
+      const searchConditions = [
         { name: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
-        { phone: { contains: search, mode: 'insensitive' } }
+        { phone: { contains: search, mode: 'insensitive' } },
+        { role: { contains: search, mode: 'insensitive' } },
+        { company: { contains: search, mode: 'insensitive' } }
       ];
+
+      if (where.OR) {
+        // Combine search with requireContact OR
+        where.AND = [
+          { OR: where.OR }, // requireContact condition
+          { OR: searchConditions } // search condition
+        ];
+        delete where.OR;
+      } else {
+        where.OR = searchConditions;
+      }
     }
 
-    const skip = (page - 1) * limit;
-    const orderBy = { [sortBy]: sortOrder };
+    // Build orderBy
+    const orderByField = sortBy === 'created_at' ? 'createdAt' : sortBy;
+    const orderBy = { [orderByField]: sortOrder };
 
+    // Execute queries in parallel
     const [contacts, total] = await Promise.all([
       this.model.findMany({
         where,
-        skip,
+        skip: (page - 1) * limit,
         take: limit,
-        orderBy
+        orderBy,
+        include: {
+          job: {
+            select: {
+              id: true,
+              title: true,
+              fileName: true,
+              status: true,
+              createdAt: true,
+              productionId: true
+            }
+          }
+        }
       }),
       this.model.count({ where })
     ]);
 
+    // Convert to entities
+    const contactEntities = contacts.map(c => this._toEntity(c));
+
     return {
-      contacts,
+      contacts: contactEntities,
       pagination: {
         page,
         limit,
         total,
-        pages: Math.ceil(total / limit)
+        totalPages: Math.ceil(total / limit),
+        hasMore: page < Math.ceil(total / limit)
       }
     };
   }
@@ -93,14 +146,26 @@ class ContactRepository extends BaseRepository {
   /**
    * Find contacts by job ID
    * @param {string} jobId - Job ID
-   * @returns {Promise<Array>} Array of contacts
+   * @returns {Promise<Array>} Array of contacts (as entities)
    */
   async findByJobId(jobId) {
-    await this.initializePrisma();
-    return await this.model.findMany({
+    logger.debug(`Finding contacts by job ID: ${jobId}`);
+    const contacts = await this.model.findMany({
       where: { jobId },
-      orderBy: { createdAt: 'asc' }
+      orderBy: { createdAt: 'asc' },
+      include: {
+        job: {
+          select: {
+            id: true,
+            title: true,
+            fileName: true,
+            status: true,
+            createdAt: true
+          }
+        }
+      }
     });
+    return contacts.map(c => this._toEntity(c));
   }
 
   /**
@@ -109,7 +174,7 @@ class ContactRepository extends BaseRepository {
    * @returns {Promise<object>} Statistics object
    */
   async getStats(userId) {
-    await this.initializePrisma();
+    logger.debug(`Getting stats for user: ${userId}`);
     
     const [
       totalContacts,
