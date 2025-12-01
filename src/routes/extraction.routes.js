@@ -38,6 +38,7 @@ const optimizedAIExtractionService = require('../services/optimizedAIExtraction.
 const awsTextractService = require('../services/awsTextract.service');
 
 const { PrismaClient } = require('@prisma/client');
+const logger = require('../utils/logger');
 
 const prisma = new PrismaClient();
 
@@ -266,16 +267,29 @@ router.post('/upload', smartRateLimit('fileUpload'), upload.single('file'), asyn
         
         // Final check
         if (typeof extractionService.extractTextFromDocument !== 'function') {
-          console.error('❌ extractTextFromDocument method not available after retries');
+          logger.error('❌ extractTextFromDocument method not available after retries', {
+          userId,
+          fileName: req.file.originalname,
+          mimeType: req.file.mimetype
+        });
           throw new Error('Extraction service not properly initialized');
         }
         
         extractedText = await extractionService.extractTextFromDocument(req.file.buffer, req.file.mimetype);
       } catch (textError) {
-        console.error('❌ Text extraction failed:', textError.message);
+        logger.error('❌ Text extraction failed', {
+          error: textError.message,
+          stack: textError.stack,
+          userId,
+          fileName: req.file.originalname,
+          mimeType: req.file.mimetype
+        });
         
         // Fallback: try to use the legacy extraction service
-        console.log('🔄 Attempting fallback to legacy extraction...');
+        logger.info('🔄 Attempting fallback to legacy extraction', {
+          userId,
+          fileName: req.file.originalname
+        });
         try {
           const legacyResult = await adaptiveExtractionService.extractContacts(
             req.file.buffer,
@@ -285,7 +299,11 @@ router.post('/upload', smartRateLimit('fileUpload'), upload.single('file'), asyn
           );
           
         if (legacyResult && legacyResult.success && legacyResult.contacts) {
-          console.log('✅ Legacy extraction successful, persisting to DB');
+          logger.info('✅ Legacy extraction successful, persisting to DB', {
+            userId,
+            fileName: req.file.originalname,
+            contactCount: legacyResult.contacts?.length || 0
+          });
           
           let jobId = null;
           try {
@@ -301,7 +319,12 @@ router.post('/upload', smartRateLimit('fileUpload'), upload.single('file'), asyn
             jobId = job.id;
             await extractionService.saveContacts(legacyResult.contacts, userId, jobId);
           } catch (persistErr) {
-            console.error('❌ Failed to persist legacy contacts:', persistErr);
+            logger.error('❌ Failed to persist legacy contacts', {
+              error: persistErr.message,
+              stack: persistErr.stack,
+              userId,
+              jobId
+            });
           }
 
           await usageService.incrementUsage(userId, 'upload', 1);
@@ -317,7 +340,12 @@ router.post('/upload', smartRateLimit('fileUpload'), upload.single('file'), asyn
           });
         }
         } catch (legacyError) {
-          console.error('❌ Legacy extraction also failed:', legacyError.message);
+          logger.error('❌ Legacy extraction also failed', {
+            error: legacyError.message,
+            stack: legacyError.stack,
+            userId,
+            fileName: req.file.originalname
+          });
         }
         
         throw new Error(`Failed to extract text from ${req.file.mimetype}: ${textError.message}`);
@@ -380,7 +408,12 @@ router.post('/upload', smartRateLimit('fileUpload'), upload.single('file'), asyn
       }
     }
 
-    console.log(`✅ Extraction completed: ${result.contacts?.length || 0} contacts found`);
+    logger.info('✅ Extraction completed', {
+      contactCount: result.contacts?.length || 0,
+      userId,
+      fileName: req.file.originalname,
+      extractionId: result.metadata?.extractionId
+    });
 
     // ⭐ TIER 1 FIX #1: Atomic database transaction
     // Prevents data corruption from partial failures
@@ -409,12 +442,16 @@ router.post('/upload', smartRateLimit('fileUpload'), upload.single('file'), asyn
         
         logger.info('✅ Extraction saved atomically', {
           jobId,
-          contactCount: savedContacts.length
+          contactCount: savedContacts.length,
+          userId
         });
         
       } catch (dbError) {
         logger.error('❌ Atomic save failed - transaction rolled back', {
-          error: dbError.message
+          error: dbError.message,
+          stack: dbError.stack,
+          userId,
+          jobId: saveResult?.job?.id
         });
         
         // Continue - extraction succeeded but save failed
@@ -457,7 +494,13 @@ router.post('/upload', smartRateLimit('fileUpload'), upload.single('file'), asyn
       success: false,
       error: syncImmediateError.message
     });
-    console.error('❌ Synchronous processing failed:', syncImmediateError.message);
+    logger.error('❌ Synchronous processing failed', {
+      error: syncImmediateError.message,
+      stack: syncImmediateError.stack,
+      userId,
+      fileName: req.file?.originalname,
+      fileSize: req.file?.size
+    });
     
     // Provide user-friendly error messages
     let errorMessage = 'Extraction failed';
