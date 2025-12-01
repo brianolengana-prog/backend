@@ -207,6 +207,17 @@ router.post('/process-text', smartRateLimit('textExtraction'), async (req, res) 
       strategy: result.metadata?.strategy || 'unknown'
     });
 
+    // ✅ FAIL-SAFE: If server-side extraction returned 0 contacts but we have client-side contacts,
+    // fall back to client-side contacts so the user still gets persisted data.
+    if ((!result.contacts || result.contacts.length === 0) && extractionOptions.clientSideContacts.length > 0) {
+      logger.warn('⚠️ No contacts from server extraction, falling back to client-side contacts', {
+        extractionId: extractionOptions.extractionId,
+        clientSideContacts: extractionOptions.clientSideContacts.length
+      });
+
+      result.contacts = extractionOptions.clientSideContacts;
+    }
+
     // Record usage
     await usageService.incrementUsage(userId, 'upload', 1);
     if (result.contacts?.length > 0) {
