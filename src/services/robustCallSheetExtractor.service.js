@@ -8,7 +8,7 @@
 const winston = require('winston');
 
 const logger = winston.createLogger({
-  level: 'info',
+  level: process.env.EXTRACTION_DEBUG === 'true' ? 'debug' : 'info', // Enable debug logs when EXTRACTION_DEBUG=true
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.json()
@@ -31,6 +31,62 @@ class RobustCallSheetExtractor {
     return {
       // High-confidence structured patterns (most common)
       structured: [
+        // ✅ NEW: Pattern 0a: ROLE: Name | email | c. phone (pipe-separated with "c." phone prefix) - HIGHEST PRIORITY
+        {
+          name: 'role_name_email_phone_pipe',
+          regex: /^([A-Za-z][A-Za-z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\|\s*([^\s\|]+@[^\s\|]+)\s*\|\s*c\.\s*([\d\s\-\(\)\.]{8,})\s*$/gmi,
+          groups: ['role', 'name', 'email', 'phone'],
+          confidence: 0.98
+        },
+        // ✅ NEW: Pattern 0b: ROLE: Name | email | c. phone (flexible, no line start/end anchors)
+        {
+          name: 'role_name_email_phone_pipe_flexible',
+          regex: /([A-Za-z][A-Za-z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\|\s*([^\s\|]+@[^\s\|]+)\s*\|\s*c\.\s*([\d\s\-\(\)\.]{8,})/gmi,
+          groups: ['role', 'name', 'email', 'phone'],
+          confidence: 0.95
+        },
+        // ✅ NEW: Pattern 0c: Name | email | c. phone (no role prefix, role might be on previous line)
+        {
+          name: 'name_email_phone_pipe',
+          regex: /^([A-Za-z][A-Za-z\s\-'\.]+)\s*\|\s*([^\s\|]+@[^\s\|]+)\s*\|\s*c\.\s*([\d\s\-\(\)\.]{8,})\s*$/gmi,
+          groups: ['name', 'email', 'phone'],
+          confidence: 0.93
+        },
+        // ✅ NEW: Pattern 0d: Name | email | c. phone (flexible)
+        {
+          name: 'name_email_phone_pipe_flexible',
+          regex: /([A-Za-z][A-Za-z\s\-'\.]+)\s*\|\s*([^\s\|]+@[^\s\|]+)\s*\|\s*c\.\s*([\d\s\-\(\)\.]{8,})/gmi,
+          groups: ['name', 'email', 'phone'],
+          confidence: 0.9
+        },
+        // ✅ NEW: Pattern 0e: c/o Agent Name | email | c. phone (agent lines with phone)
+        {
+          name: 'agent_name_email_phone_pipe',
+          regex: /c\/o\s+([A-Za-z\s\-'\.]+)\s*\|\s*([^\s\|]+@[^\s\|]+)\s*\|\s*c\.\s*([\d\s\-\(\)\.]{8,})/gmi,
+          groups: ['name', 'email', 'phone'],
+          confidence: 0.92
+        },
+        // ✅ NEW: Pattern 0h: c/o Agent Name | email (agent lines without phone)
+        {
+          name: 'agent_name_email_pipe',
+          regex: /c\/o\s+([A-Za-z\s\-'\.]+)\s*\|\s*([^\s\|]+@[^\s\|]+)/gmi,
+          groups: ['name', 'email'],
+          confidence: 0.88
+        },
+        // ✅ NEW: Pattern 0f: ROLE: Name | c. phone (no email)
+        {
+          name: 'role_name_phone_pipe',
+          regex: /^([A-Za-z][A-Za-z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\|\s*c\.\s*([\d\s\-\(\)\.]{8,})\s*$/gmi,
+          groups: ['role', 'name', 'phone'],
+          confidence: 0.9
+        },
+        // ✅ NEW: Pattern 0g: ROLE: Name | c. phone (flexible)
+        {
+          name: 'role_name_phone_pipe_flexible',
+          regex: /([A-Za-z][A-Za-z\s&\/\-]+):\s*([A-Za-z\s\-'\.]+)\s*\|\s*c\.\s*([\d\s\-\(\)\.]{8,})/gmi,
+          groups: ['role', 'name', 'phone'],
+          confidence: 0.85
+        },
         // Pattern 1: ROLE: Name / Phone (most common) - CASE INSENSITIVE
         {
           name: 'role_name_phone_slash',
@@ -126,6 +182,20 @@ class RobustCallSheetExtractor {
 
       // Medium-confidence patterns (semi-structured)
       semiStructured: [
+        // ✅ NEW: Pattern 5a: Multi-line ROLE: followed by Name | email | c. phone on next line
+        {
+          name: 'multiline_role_name_email_phone_pipe',
+          regex: /^([A-Za-z][A-Za-z\s&\/\-]+):\s*\n\s*([A-Za-z\s\-'\.]+)\s*\|\s*([^\s\|]+@[^\s\|]+)\s*\|\s*c\.\s*([\d\s\-\(\)\.]{8,})\s*$/gmi,
+          groups: ['role', 'name', 'email', 'phone'],
+          confidence: 0.92
+        },
+        // ✅ NEW: Pattern 5b: Multi-line ROLE: followed by Name | c. phone (no email) on next line
+        {
+          name: 'multiline_role_name_phone_pipe',
+          regex: /^([A-Za-z][A-Za-z\s&\/\-]+):\s*\n\s*([A-Za-z\s\-'\.]+)\s*\|\s*c\.\s*([\d\s\-\(\)\.]{8,})\s*$/gmi,
+          groups: ['role', 'name', 'phone'],
+          confidence: 0.9
+        },
         // Pattern 6: Multi-line format (name on one line, phone on next)
         {
           name: 'multiline_name_phone',
@@ -247,13 +317,13 @@ class RobustCallSheetExtractor {
       const sectionResults = this.extractBySections(text, extractionId);
       
       // Step 2: Extract with structured patterns
-      const structuredResults = this.extractWithPatterns(text, this.patterns.structured, 'structured');
+      const structuredResults = this.extractWithPatterns(text, this.patterns.structured, 'structured', extractionId);
       
       // Step 3: Extract with semi-structured patterns
-      const semiStructuredResults = this.extractWithPatterns(text, this.patterns.semiStructured, 'semi-structured');
+      const semiStructuredResults = this.extractWithPatterns(text, this.patterns.semiStructured, 'semi-structured', extractionId);
       
       // Step 4: Extract with unstructured patterns (fallback)
-      const unstructuredResults = this.extractWithPatterns(text, this.patterns.unstructured, 'unstructured');
+      const unstructuredResults = this.extractWithPatterns(text, this.patterns.unstructured, 'unstructured', extractionId);
       
       // Step 5: Merge and deduplicate results
       const allContacts = [
@@ -336,8 +406,8 @@ class RobustCallSheetExtractor {
         const sectionType = sectionPattern.section;
         
         // Extract contacts from this section using all patterns
-        const sectionContacts = this.extractWithPatterns(sectionContent, this.patterns.structured, 'section-structured');
-        const semiSectionContacts = this.extractWithPatterns(sectionContent, this.patterns.semiStructured, 'section-semi');
+        const sectionContacts = this.extractWithPatterns(sectionContent, this.patterns.structured, 'section-structured', extractionId);
+        const semiSectionContacts = this.extractWithPatterns(sectionContent, this.patterns.semiStructured, 'section-semi', extractionId);
         
         // Add section context to contacts
         const sectionContactsWithContext = [
@@ -360,21 +430,88 @@ class RobustCallSheetExtractor {
   /**
    * Extract contacts using specific pattern set
    */
-  extractWithPatterns(text, patterns, category) {
+  extractWithPatterns(text, patterns, category, extractionId = null) {
     const contacts = [];
     let count = 0;
+    const patternStats = [];
+
+    logger.info(`🔍 Processing ${category} patterns`, {
+      extractionId,
+      patternCount: patterns.length,
+      textLength: text.length,
+      textPreview: text.substring(0, 200) // First 200 chars for debugging
+    });
 
     for (const pattern of patterns) {
-      const matches = [...text.matchAll(pattern.regex)];
+      const patternStartTime = Date.now();
+      let matchCount = 0;
+      let validContactCount = 0;
       
-      for (const match of matches) {
-        const contact = this.buildContactFromMatch(match, pattern, category);
-        if (contact && this.isValidContact(contact)) {
-          contacts.push(contact);
-          count++;
+      try {
+        const matches = [...text.matchAll(pattern.regex)];
+        matchCount = matches.length;
+        
+        logger.debug(`🔍 Testing pattern: ${pattern.name}`, {
+          extractionId,
+          category,
+          matchCount,
+          regex: pattern.regex.toString().substring(0, 100), // First 100 chars of regex
+          sampleMatch: matches.length > 0 ? matches[0][0].substring(0, 100) : null
+        });
+        
+        for (const match of matches) {
+          try {
+            const contact = this.buildContactFromMatch(match, pattern, category);
+            if (contact && this.isValidContact(contact)) {
+              contacts.push(contact);
+              count++;
+              validContactCount++;
+              
+              logger.debug(`✅ Pattern ${pattern.name} extracted contact`, {
+                extractionId,
+                name: contact.name,
+                email: contact.email ? 'present' : 'missing',
+                phone: contact.phone ? 'present' : 'missing',
+                role: contact.role || 'missing'
+              });
+            } else {
+              logger.debug(`⚠️ Pattern ${pattern.name} match rejected`, {
+                extractionId,
+                reason: !contact ? 'buildContactFromMatch returned null' : 'isValidContact returned false',
+                matchPreview: match[0].substring(0, 100)
+              });
+            }
+          } catch (contactError) {
+            logger.warn(`❌ Error building contact from pattern ${pattern.name}`, {
+              extractionId,
+              error: contactError.message,
+              matchPreview: match[0]?.substring(0, 100)
+            });
+          }
         }
+      } catch (patternError) {
+        logger.error(`❌ Error testing pattern ${pattern.name}`, {
+          extractionId,
+          error: patternError.message,
+          regex: pattern.regex.toString()
+        });
       }
+      
+      const patternTime = Date.now() - patternStartTime;
+      patternStats.push({
+        name: pattern.name,
+        category,
+        matchCount,
+        validContactCount,
+        time: patternTime
+      });
     }
+
+    logger.info(`✅ ${category} patterns completed`, {
+      extractionId,
+      totalContacts: count,
+      patternStats: patternStats.filter(s => s.matchCount > 0 || s.validContactCount > 0)
+    });
 
     return { contacts, count };
   }
