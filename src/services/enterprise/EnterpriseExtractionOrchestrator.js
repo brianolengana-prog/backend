@@ -7,7 +7,39 @@ const QueueManager = require('./QueueManager');
 const DocumentClassifier = require('./DocumentClassifier');
 const MonitoringService = require('./MonitoringService');
 const CircuitBreaker = require('./CircuitBreaker');
-const CacheManager = require('./CacheManager');
+
+// Define CacheManager before using it
+class CacheManager {
+  constructor() {
+    this.cache = new Map();
+  }
+
+  async get(key) {
+    return this.cache.get(key);
+  }
+
+  async set(key, value, options = {}) {
+    this.cache.set(key, value);
+    
+    if (options.ttl) {
+      setTimeout(() => {
+        this.cache.delete(key);
+      }, options.ttl * 1000);
+    }
+  }
+
+  async getStats() {
+    return { size: this.cache.size };
+  }
+
+  clear() {
+    this.cache.clear();
+  }
+
+  async shutdown() {
+    this.cache.clear();
+  }
+}
 
 class EnterpriseExtractionOrchestrator {
   constructor() {
@@ -26,17 +58,15 @@ class EnterpriseExtractionOrchestrator {
   }
 
   initializeStrategies() {
-    // Load all available extraction strategies
-    this.strategies.set('adaptive_extraction', require('../extraction/ExtractionOrchestrator'));
-    this.strategies.set('ai_enhanced_extraction', require('../aiExtraction.service'));
-    this.strategies.set('table_aware_extraction', require('./strategies/TableAwareExtraction'));
-    this.strategies.set('form_pattern_extraction', require('./strategies/FormPatternExtraction'));
-    this.strategies.set('nlp_enhanced_extraction', require('./strategies/NLPEnhancedExtraction'));
-    this.strategies.set('financial_document_extraction', require('./strategies/FinancialDocumentExtraction'));
-    this.strategies.set('resume_extraction', require('./strategies/ResumeExtraction'));
-    this.strategies.set('legal_document_extraction', require('./strategies/LegalDocumentExtraction'));
-    this.strategies.set('medical_record_extraction', require('./strategies/MedicalRecordExtraction'));
+    // Load all available extraction strategies (with error handling)
+    try {
+      this.strategies.set('adaptive_extraction', require('../extraction/ExtractionOrchestrator'));
+    } catch (error) {
+      console.warn('⚠️ Could not load adaptive_extraction strategy:', error.message);
+    }
     
+    // Only load strategies that actually exist
+    // Other strategies can be added later when their files are created
     console.log('🎯 Extraction strategies initialized:', Array.from(this.strategies.keys()));
   }
 
@@ -196,6 +226,12 @@ class EnterpriseExtractionOrchestrator {
       };
 
     } catch (error) {
+      // Log the error details for debugging
+      console.error('❌ Synchronous processing error:', {
+        message: error.message,
+        stack: error.stack,
+        extractionId
+      });
       throw new Error(`Synchronous processing failed: ${error.message}`);
     }
   }
@@ -678,37 +714,6 @@ class CircuitBreaker extends require('events').EventEmitter {
   }
 }
 
-class CacheManager {
-  constructor() {
-    this.cache = new Map();
-  }
-
-  async get(key) {
-    return this.cache.get(key);
-  }
-
-  async set(key, value, options = {}) {
-    this.cache.set(key, value);
-    
-    if (options.ttl) {
-      setTimeout(() => {
-        this.cache.delete(key);
-      }, options.ttl * 1000);
-    }
-  }
-
-  async getStats() {
-    return { size: this.cache.size };
-  }
-
-  clear() {
-    this.cache.clear();
-  }
-
-  async shutdown() {
-    this.cache.clear();
-  }
-}
 
 class LoadBalancer {
   constructor() {

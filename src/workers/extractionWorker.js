@@ -107,8 +107,29 @@ class ExtractionWorker {
     this.isRunning = false;
     logger.info('Stopping extraction workers...');
 
-    // Close all workers
-    await Promise.all(this.workers.map(worker => worker.close()));
+    // Close all workers (check if close method exists)
+    await Promise.all(
+      this.workers
+        .filter(worker => worker && typeof worker.close === 'function')
+        .map(worker => worker.close())
+    );
+    
+    // Close the queues themselves (Bull queues handle worker cleanup)
+    const extractionQueue = queueManager.getQueue('extraction');
+    const priorityQueue = queueManager.getQueue('extraction-priority');
+    
+    if (extractionQueue) {
+      await extractionQueue.close().catch(err => {
+        logger.warn('Error closing extraction queue', { error: err.message });
+      });
+    }
+    
+    if (priorityQueue) {
+      await priorityQueue.close().catch(err => {
+        logger.warn('Error closing priority queue', { error: err.message });
+      });
+    }
+    
     this.workers = [];
 
     logger.info('Extraction workers stopped');

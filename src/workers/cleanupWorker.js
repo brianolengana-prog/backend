@@ -102,8 +102,22 @@ class CleanupWorker {
     this.isRunning = false;
     logger.info('Stopping cleanup workers...');
 
-    // Close all workers
-    await Promise.all(this.workers.map(worker => worker.close()));
+    // Close all workers (check if close method exists)
+    await Promise.all(
+      this.workers
+        .filter(worker => worker && typeof worker.close === 'function')
+        .map(worker => worker.close())
+    );
+    
+    // Close the queue itself (Bull queues handle worker cleanup)
+    const cleanupQueue = queueManager.getQueue('cleanup');
+    
+    if (cleanupQueue) {
+      await cleanupQueue.close().catch(err => {
+        logger.warn('Error closing cleanup queue', { error: err.message });
+      });
+    }
+    
     this.workers = [];
 
     logger.info('Cleanup workers stopped');
