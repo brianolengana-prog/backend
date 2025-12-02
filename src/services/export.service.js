@@ -1,5 +1,5 @@
 const XLSX = require('xlsx');
-const { logger } = require('../utils/logger');
+const logger = require('../utils/logger');
 
 /**
  * Enterprise-grade Contact Export Service

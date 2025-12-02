@@ -10,7 +10,7 @@
 const ContactRepository = require('../repositories/ContactRepository');
 const ContactValidationService = require('./ContactValidationService');
 const ExportService = require('../../../services/export.service');
-const { logger } = require('../../../shared/infrastructure/logger/logger.service');
+const logger = require('../../../shared/infrastructure/logger/logger.service');
 
 class ContactExportService {
   constructor({
@@ -57,10 +57,22 @@ class ContactExportService {
     logger.info(`Found ${contacts.length} contacts to export`);
 
     // Validate and clean before export
-    const { cleaned } = this.validationService.validateAndCleanContacts(contacts, {
+    const validationResult = this.validationService.validateAndCleanContacts(contacts, {
       removeInvalid: true,
       deduplicate: true
     });
+
+    // Validate validation result structure
+    if (!validationResult || typeof validationResult !== 'object') {
+      logger.error('Validation service returned invalid result', { validationResult });
+      throw new Error('Contact validation failed: Invalid result structure');
+    }
+
+    const { cleaned } = validationResult;
+    if (!Array.isArray(cleaned)) {
+      logger.error('Validation service returned invalid cleaned array', { cleaned });
+      throw new Error('Contact validation failed: Invalid cleaned contacts array');
+    }
 
     if (cleaned.length === 0) {
       throw new Error('No valid contacts to export after validation');
@@ -69,7 +81,24 @@ class ContactExportService {
     logger.info(`Exporting ${cleaned.length} cleaned contacts`);
 
     // Use existing export service for format generation
-    return await this.exportService.exportContacts(cleaned, format, exportOptions);
+    const exportResult = await this.exportService.exportContacts(cleaned, format, exportOptions);
+
+    // Validate export result structure
+    if (!exportResult || typeof exportResult !== 'object') {
+      logger.error('Export service returned invalid result', { exportResult });
+      throw new Error('Export failed: Invalid result structure');
+    }
+
+    if (!exportResult.data || !exportResult.filename || !exportResult.mimeType) {
+      logger.error('Export service returned incomplete result', { 
+        hasData: !!exportResult.data,
+        hasFilename: !!exportResult.filename,
+        hasMimeType: !!exportResult.mimeType
+      });
+      throw new Error('Export failed: Missing required fields (data, filename, or mimeType)');
+    }
+
+    return exportResult;
   }
 
   /**

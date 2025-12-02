@@ -221,9 +221,13 @@ router.get('/export', async (req, res) => {
     }
   } catch (error) {
     console.error('❌ Error exporting contacts:', error);
+    const errorMessage = error && typeof error === 'object' && error.message 
+      ? error.message 
+      : (typeof error === 'string' ? error : 'Failed to export contacts');
+    
     res.status(500).json({ 
       success: false, 
-      error: error.message || 'Failed to export contacts' 
+      error: errorMessage
     });
   }
 });
