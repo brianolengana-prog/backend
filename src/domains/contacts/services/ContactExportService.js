@@ -79,17 +79,15 @@ class ContactExportService {
   async getContactsForExport(userId, { jobId, contactIds }) {
     // STRICT: If jobId provided, ONLY get contacts from that job
     if (jobId && jobId !== 'all') {
-      const jobContacts = await this.contactRepository.findByJobId(jobId);
-      
-      // Security: Filter to user's contacts
-      let userContacts = jobContacts.filter(c => c.userId === userId);
+      // Pass userId for security filtering at database level
+      const jobContacts = await this.contactRepository.findByJobId(jobId, userId);
       
       // If specific contact IDs requested, filter further
       if (contactIds && contactIds.length > 0) {
-        userContacts = userContacts.filter(c => contactIds.includes(c.id));
+        return jobContacts.filter(c => contactIds.includes(c.id));
       }
       
-      return userContacts;
+      return jobContacts;
     }
 
     // If specific contact IDs requested, get those
