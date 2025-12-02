@@ -1,5 +1,5 @@
 const BaseRepository = require('../../../shared/infrastructure/database/base.repository');
-const { DatabaseManager } = require('../../../shared/infrastructure/database/database.manager');
+const db = require('../../../config/database');
 const { Contact } = require('../entities/Contact');
 const { logger } = require('../../../shared/infrastructure/logger/logger.service');
 
@@ -11,8 +11,8 @@ const { logger } = require('../../../shared/infrastructure/logger/logger.service
  */
 class ContactRepository extends BaseRepository {
   constructor() {
-    const prisma = DatabaseManager.getInstance().getClient();
-    super(prisma.contact, prisma);
+    const prisma = db.getClient();
+    super('contact', prisma);
     logger.info('ContactRepository initialized');
   }
 
