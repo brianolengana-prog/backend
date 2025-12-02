@@ -17,6 +17,7 @@ async function start() {
       console.log('✅ Subscription renewal job started');
     } catch (jobError) {
       console.warn('⚠️ Failed to start subscription renewal job:', jobError.message);
+      console.warn('⚠️ Error details:', jobError.stack);
       // Don't fail startup if job fails
     }
     
