@@ -28,6 +28,7 @@ model User {
   loginAttempts     Int       @default(0) @map("login_attempts")
   lockedUntil       DateTime? @map("locked_until")
   lastLoginAt       DateTime? @map("last_login_at")
+  stripeCustomerId  String?   @map("stripe_customer_id")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
