@@ -530,4 +530,99 @@ function estimateContactCount(text) {
   return Math.min(emailCount, phoneCount, nameCount) || 0;
 }
 
+/**
+ * POST /api/extraction/save-contacts
+ * Save contacts after editing (delayed persistence)
+ * This endpoint allows the frontend to save contacts after user edits them
+ */
+router.post('/save-contacts', smartRateLimit('textExtraction'), async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const { contacts, fileName, jobId: providedJobId } = req.body;
+
+    logger.info('💾 Save contacts request received', {
+      userId,
+      fileName,
+      contactCount: Array.isArray(contacts) ? contacts.length : 0,
+      hasJobId: !!providedJobId
+    });
+
+    // Validate required fields
+    if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Contacts array is required and must not be empty'
+      });
+    }
+
+    // Ensure profile exists
+    await ensureProfileForUser(userId);
+
+    let jobId = providedJobId;
+
+    // Create or update job record
+    if (jobId) {
+      // Update existing job
+      try {
+        await prisma.job.update({
+          where: { id: jobId, userId }, // Security: ensure user owns the job
+          data: {
+            status: 'COMPLETED',
+            updatedAt: new Date()
+          }
+        });
+        logger.info('✅ Updated existing job', { userId, jobId });
+      } catch (error) {
+        logger.warn('⚠️ Job not found or access denied, creating new job', { userId, jobId, error: error.message });
+        jobId = null; // Will create new job below
+      }
+    }
+
+    if (!jobId) {
+      // Create new job
+      const job = await prisma.job.create({
+        data: {
+          userId,
+          title: fileName ? `Extraction - ${fileName}` : `Extraction - ${new Date().toLocaleDateString()}`,
+          fileName: fileName || null,
+          status: 'COMPLETED'
+        }
+      });
+      jobId = job.id;
+      logger.info('✅ Created new job', { userId, jobId });
+    }
+
+    // Save contacts using extraction service
+    await extractionService.saveContacts(contacts, userId, jobId);
+
+    // Update usage tracking
+    await usageService.incrementUsage(userId, 'contact_extraction', contacts.length);
+
+    logger.info('✅ Contacts saved successfully', {
+      userId,
+      jobId,
+      contactCount: contacts.length
+    });
+
+    res.json({
+      success: true,
+      jobId: jobId,
+      contactCount: contacts.length
+    });
+
+  } catch (error) {
+    logger.error('❌ Error saving contacts', {
+      userId: req.user?.id,
+      error: error.message,
+      stack: error.stack
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to save contacts',
+      message: error.message
+    });
+  }
+});
+
 module.exports = router;
