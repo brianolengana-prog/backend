@@ -80,8 +80,18 @@ class ContactExportService {
 
     logger.info(`Exporting ${cleaned.length} cleaned contacts`);
 
+    // Convert Contact entities to plain objects if needed
+    const plainContacts = cleaned.map(contact => {
+      // If contact has toObject method (Contact entity), use it
+      if (contact && typeof contact.toObject === 'function') {
+        return contact.toObject();
+      }
+      // Otherwise, return as-is (already plain object)
+      return contact;
+    });
+
     // Use existing export service for format generation
-    const exportResult = await this.exportService.exportContacts(cleaned, format, exportOptions);
+    const exportResult = await this.exportService.exportContacts(plainContacts, format, exportOptions);
 
     // Validate export result structure
     if (!exportResult || typeof exportResult !== 'object') {
