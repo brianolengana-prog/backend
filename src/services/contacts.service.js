@@ -1,6 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const exportService = require('./export.service');
-const { logger } = require('../utils/logger');
+const logger = require('../utils/logger');
 
 const prisma = new PrismaClient();
 
@@ -463,15 +463,32 @@ class ContactsService {
       logger.info(`✅ Found ${contacts.length} contacts to export`);
 
       // Use the centralized export service
-      return await exportService.exportContacts(contacts, format, options);
+      const result = await exportService.exportContacts(contacts, format, options);
+      
+      // Validate result structure
+      if (!result || typeof result !== 'object') {
+        throw new Error(`Invalid export result: expected object, got ${typeof result}`);
+      }
+      
+      if (!result.data || !result.filename || !result.mimeType) {
+        throw new Error(`Invalid export result structure: missing required fields. Got: ${JSON.stringify(Object.keys(result || {}))}`);
+      }
+      
+      return result;
     } catch (error) {
-      logger.error('❌ Error exporting contacts', { 
-        error: error.message, 
-        userId, 
+      // Safe error logging - use console.error to avoid winston issues
+      const errorMessage = error?.message || String(error || 'Unknown error');
+      console.error('❌ Error exporting contacts:', {
+        message: errorMessage,
+        userId,
         format,
-        stack: error.stack 
+        stack: error?.stack
       });
-      throw error;
+      
+      // Re-throw with a clean error message
+      const exportError = new Error(`Export failed: ${errorMessage}`);
+      exportError.stack = error?.stack;
+      throw exportError;
     }
   }
 

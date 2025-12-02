@@ -126,8 +126,6 @@ router.get('/', async (req, res) => {
       requireContact
     };
 
-    // STRICT: Enforce jobId scoping if provided in query
-    const jobId = req.query.jobId;
     const service = getContactsService(req.user.id);
     
     // STRICT: If jobId in query, enforce strict scoping (don't allow 'all' override)
@@ -152,28 +150,6 @@ router.get('/', async (req, res) => {
 });
 
 /**
- * GET /api/contacts/:id
- * Get a specific contact by ID
- */
-router.get('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    console.log(`📋 Getting contact ${id} for user: ${req.user.id}`);
-    const contact = await contactsService.getContactById(req.user.id, id);
-    res.json({ 
-      success: true, 
-      data: contact 
-    });
-  } catch (error) {
-    console.error('❌ Error getting contact:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to get contact' 
-    });
-  }
-});
-
-/**
  * GET /api/contacts/export
  * Export contacts in multiple formats (CSV, Excel, JSON, vCard)
  * 
@@ -184,6 +160,8 @@ router.get('/:id', async (req, res) => {
  * - includeFields: Comma-separated fields to include (optional)
  * - delimiter: CSV delimiter: ',' or ';' (optional, CSV only)
  * - customFileName: Custom filename (optional)
+ * 
+ * ⚠️ IMPORTANT: This route MUST be defined BEFORE /:id to avoid route conflicts
  */
 router.get('/export', async (req, res) => {
   try {
@@ -222,13 +200,35 @@ router.get('/export', async (req, res) => {
     // STRICT: Use new export service with validation
     const service = getContactsService(req.user.id);
     
-    const { data, filename, mimeType } = await service.exportContacts(
+    console.log('📤 Starting export', {
+      userId: req.user.id,
+      format: normalizedFormat,
+      jobId,
+      contactIds: contactIds?.length || 0,
+      options: Object.keys(exportOptions)
+    });
+    
+    const result = await service.exportContacts(
       req.user.id, 
       contactIds, 
       normalizedFormat, 
       jobId || null,
       exportOptions
     );
+    
+    console.log('✅ Export result:', {
+      hasData: !!result?.data,
+      hasFilename: !!result?.filename,
+      hasMimeType: !!result?.mimeType,
+      dataType: typeof result?.data,
+      dataLength: result?.data?.length || 'N/A'
+    });
+    
+    if (!result || !result.data || !result.filename || !result.mimeType) {
+      throw new Error(`Invalid export result: ${JSON.stringify(result)}`);
+    }
+    
+    const { data, filename, mimeType } = result;
     
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -240,10 +240,44 @@ router.get('/export', async (req, res) => {
       res.send(data);
     }
   } catch (error) {
-    console.error('❌ Error exporting contacts:', error);
+    console.error('❌ Error exporting contacts:', {
+      message: error?.message,
+      stack: error?.stack,
+      error: error,
+      errorType: typeof error,
+      errorKeys: error ? Object.keys(error) : []
+    });
+    
+    const errorMessage = error?.message || error?.toString() || 'Failed to export contacts';
+    
     res.status(500).json({ 
       success: false, 
-      error: error.message || 'Failed to export contacts' 
+      error: errorMessage
+    });
+  }
+});
+
+/**
+ * GET /api/contacts/:id
+ * Get a specific contact by ID
+ * 
+ * ⚠️ IMPORTANT: This route MUST be defined AFTER /export to avoid route conflicts
+ */
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`📋 Getting contact ${id} for user: ${req.user.id}`);
+    const service = getContactsService(req.user.id);
+    const contact = await service.getContactById(req.user.id, id);
+    res.json({ 
+      success: true, 
+      data: contact 
+    });
+  } catch (error) {
+    console.error('❌ Error getting contact:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to get contact' 
     });
   }
 });
@@ -256,7 +290,8 @@ router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     console.log(`🗑️ Deleting contact ${id} for user: ${req.user.id}`);
-    await contactsService.deleteContact(req.user.id, id);
+    const service = getContactsService(req.user.id);
+    await service.deleteContact(req.user.id, id);
     res.json({ 
       success: true, 
       message: 'Contact deleted successfully' 

@@ -2,15 +2,27 @@ const { PrismaClient } = require('@prisma/client');
 
 class Database {
   constructor() {
-    this.client = new PrismaClient({
-      log: process.env.NODE_ENV === 'development' 
-        ? ['query', 'info', 'warn', 'error'] 
-        : ['error'],
-      errorFormat: 'pretty',
-    });
+    // Lazy initialization - don't create PrismaClient until needed
+    this._client = null;
     this.connected = false;
     this.connectionAttempts = 0;
     this.maxRetries = 3;
+  }
+
+  /**
+   * Get Prisma client instance (lazy initialization)
+   * @returns {PrismaClient}
+   */
+  getClient() {
+    if (!this._client) {
+      this._client = new PrismaClient({
+        log: process.env.NODE_ENV === 'development' 
+          ? ['query', 'info', 'warn', 'error'] 
+          : ['error'],
+        errorFormat: 'pretty',
+      });
+    }
+    return this._client;
   }
 
   /**
@@ -56,7 +68,7 @@ class Database {
       
       try {
         console.log(`Attempting database connection (${attempt}/${this.maxRetries})...`);
-        await this.client.$connect();
+        await this.getClient().$connect();
         console.log(`✅ Database connection successful on attempt ${attempt}`);
         return;
       } catch (error) {
@@ -79,11 +91,12 @@ class Database {
    * @returns {Promise<void>}
    */
   async disconnect() {
-    if (!this.connected) return;
+    if (!this.connected || !this._client) return;
     
     try {
-      await this.client.$disconnect();
+      await this.getClient().$disconnect();
       this.connected = false;
+      this._client = null;
       console.log('✅ Database disconnected');
     } catch (error) {
       console.error('Error disconnecting from database', { error: error.message });
@@ -97,20 +110,12 @@ class Database {
    */
   async testConnection() {
     try {
-      await this.client.$queryRaw`SELECT 1`;
+      await this.getClient().$queryRaw`SELECT 1`;
       return true;
     } catch (error) {
       console.error('Database connection test failed', { error: error.message });
       return false;
     }
-  }
-
-  /**
-   * Get Prisma client instance
-   * @returns {PrismaClient}
-   */
-  getClient() {
-    return this.client;
   }
 
   /**

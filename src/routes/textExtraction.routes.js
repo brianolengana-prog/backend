@@ -163,6 +163,7 @@ router.post('/process-text', smartRateLimit('textExtraction'), async (req, res) 
       maxContacts: 1000,
       maxProcessingTime: 60000, // 60 seconds timeout for AI processing
       clientSideContacts: Array.isArray(clientSideContacts) ? clientSideContacts : [], // ✅ PASS CLIENT CONTACTS TO EXTRACTION
+      forceAI: parsedOptions.forceAI || false, // ✅ Pass forceAI flag to extraction service
       ...parsedOptions
     };
 
@@ -224,12 +225,15 @@ router.post('/process-text', smartRateLimit('textExtraction'), async (req, res) 
       await usageService.incrementUsage(userId, 'contact_extraction', result.contacts.length);
     }
 
+    // ✅ CHECK: Skip saving if skipSave option is set (for editing workflow)
+    const skipSave = parsedOptions.skipSave === true;
+    
     // ⭐ TIER 1 FIX #1: Atomic database transaction
     // Prevents data corruption from partial failures
     let jobId = null;
     let savedContacts = [];
     
-    if (result.contacts && result.contacts.length > 0) {
+    if (!skipSave && result.contacts && result.contacts.length > 0) {
       try {
         logger.info('💾 Saving contacts atomically', {
           userId,
@@ -270,6 +274,12 @@ router.post('/process-text', smartRateLimit('textExtraction'), async (req, res) 
         // Don't fail the request, just log the error
         // Contacts are still returned in response for immediate use
       }
+    } else if (skipSave) {
+      logger.info('⏭️ Skipping save (skipSave=true) - contacts will be saved after user review', {
+        userId,
+        fileName,
+        contactCount: result.contacts?.length || 0
+      });
     } else {
       logger.warn('⚠️ No contacts to save', {
         userId,
@@ -529,5 +539,121 @@ function estimateContactCount(text) {
   // Estimate based on the minimum of these counts
   return Math.min(emailCount, phoneCount, nameCount) || 0;
 }
+
+/**
+ * POST /api/extraction/save-contacts
+ * Save contacts after user review and editing
+ * This endpoint is called after the user has reviewed and edited contacts
+ */
+router.post('/save-contacts', smartRateLimit('textExtraction'), async (req, res) => {
+  const startTime = Date.now();
+  
+  try {
+    const userId = req.user?.id;
+    const { contacts, fileName, jobId } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+    }
+
+    if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Contacts array is required and must not be empty'
+      });
+    }
+
+    logger.info('💾 Saving contacts after user review', {
+      userId,
+      contactCount: contacts.length,
+      fileName,
+      existingJobId: jobId
+    });
+
+    // Ensure profile exists
+    await ensureProfileForUser(userId);
+
+    let finalJobId = jobId;
+
+    // If no jobId provided, create a new job
+    if (!finalJobId) {
+      const job = await prisma.job.create({
+        data: {
+          userId,
+          title: fileName ? `Extraction - ${fileName}` : `Extraction - ${new Date().toLocaleDateString()}`,
+          fileName: fileName || 'extracted-contacts',
+          status: 'COMPLETED'
+        }
+      });
+      finalJobId = job.id;
+      logger.info('✅ Created new job for saved contacts', { jobId: finalJobId });
+    } else {
+      // Update existing job if needed
+      await prisma.job.update({
+        where: { id: finalJobId },
+        data: {
+          status: 'COMPLETED',
+          fileName: fileName || undefined
+        }
+      }).catch(err => {
+        logger.warn('⚠️ Failed to update existing job', { jobId: finalJobId, error: err.message });
+      });
+    }
+
+    // Prepare contacts data
+    const contactsData = contacts.map(contact => ({
+      jobId: finalJobId,
+      userId,
+      name: contact.name || '',
+      email: contact.email && contact.email.trim() !== '' ? contact.email : null,
+      phone: contact.phone && contact.phone.trim() !== '' ? contact.phone : null,
+      role: contact.role || null,
+      company: contact.company || null,
+      isSelected: true
+    }));
+
+    // Delete existing contacts for this job (if updating)
+    if (jobId) {
+      await prisma.contact.deleteMany({
+        where: { jobId: finalJobId }
+      });
+      logger.info('🗑️ Deleted existing contacts for job', { jobId: finalJobId });
+    }
+
+    // Save contacts
+    await prisma.contact.createMany({
+      data: contactsData,
+      skipDuplicates: true
+    });
+
+    logger.info('✅ Contacts saved successfully', {
+      userId,
+      jobId: finalJobId,
+      contactCount: contactsData.length,
+      processingTime: `${Date.now() - startTime}ms`
+    });
+
+    return res.json({
+      success: true,
+      jobId: finalJobId,
+      contactsSaved: contactsData.length
+    });
+
+  } catch (error) {
+    logger.error('❌ Failed to save contacts', {
+      error: error.message,
+      stack: error.stack,
+      processingTime: `${Date.now() - startTime}ms`
+    });
+
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to save contacts'
+    });
+  }
+});
 
 module.exports = router;

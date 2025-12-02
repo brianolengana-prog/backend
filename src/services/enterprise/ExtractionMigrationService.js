@@ -7,6 +7,7 @@
 
 const EnhancedAdaptiveExtractionService = require('./EnhancedAdaptiveExtraction.service');
 const optimizedAIUsageService = require('../optimizedAIUsage.service');
+const unifiedExtraction = require('../unifiedExtraction.service'); // ✅ AI-First unified service
 const enterpriseConfig = require('../../config/enterprise.config');
 const winston = require('winston');
 
@@ -111,30 +112,54 @@ class ExtractionMigrationService {
         clientSideContactsReceived: clientSideContacts.length // ✅ LOG CLIENT CONTACTS
       });
 
-          // Always use optimized hybrid extraction for best performance
-          if (useEnterprise || options.forceOptimized !== false) {
-            // Use optimized hybrid extraction (new default)
-            const optimizedExtractor = new this.optimizedExtractor();
-            const patternResult = await optimizedExtractor.extractContacts(text, {
-              ...options,
-              extractionId
+          // ✅ AI-FIRST ARCHITECTURE: Use unified extraction service (primary method)
+          // This implements the recommended AI-first approach with pattern integration
+          if (useEnterprise || options.forceOptimized !== false || options.useUnified !== false) {
+            logger.info('🤖 Using AI-first unified extraction service', {
+              extractionId,
+              textLength: text.length
             });
 
-            // Use smart AI optimization for enhancement
-            const enhancedResult = await this.optimizedAIUsage.processWithSmartAI(
-              text,
-              patternResult,
-              {
-                confidenceThreshold: 0.7,
-                disableAI: options.disableAI
-              }
-            );
+            try {
+              // Use unified extraction service (AI-first with pattern integration)
+              const unifiedResult = await unifiedExtraction.extractContacts(text, {
+                ...options,
+                extractionId,
+                rolePreferences: options.rolePreferences
+              });
 
-            // ✅ MERGE CLIENT-SIDE CONTACTS WITH BACKEND RESULTS
-            const mergedResult = this.mergeClientSideContacts(enhancedResult, clientSideContacts, extractionId);
+              // ✅ MERGE CLIENT-SIDE CONTACTS WITH UNIFIED RESULTS
+              const mergedResult = this.mergeClientSideContacts(unifiedResult, clientSideContacts, extractionId);
 
-            // Transform to legacy format for compatibility
-            return this.transformOptimizedToLegacy(mergedResult, extractionId);
+              // Transform to legacy format for compatibility
+              return this.transformUnifiedToLegacy(mergedResult, extractionId);
+            } catch (unifiedError) {
+              logger.warn('⚠️ Unified extraction failed, falling back to optimized hybrid', {
+                extractionId,
+                error: unifiedError.message
+              });
+
+              // Fallback to optimized hybrid extraction
+              const optimizedExtractor = new this.optimizedExtractor();
+              const patternResult = await optimizedExtractor.extractContacts(text, {
+                ...options,
+                extractionId
+              });
+
+              const forceAI = options.forceAI === true || (options.clientSideContacts && options.clientSideContacts.length > 0);
+              const enhancedResult = await this.optimizedAIUsage.processWithSmartAI(
+                text,
+                patternResult,
+                {
+                  confidenceThreshold: 0.7,
+                  disableAI: options.disableAI,
+                  forceAI: forceAI
+                }
+              );
+
+              const mergedResult = this.mergeClientSideContacts(enhancedResult, clientSideContacts, extractionId);
+              return this.transformOptimizedToLegacy(mergedResult, extractionId);
+            }
           } else {
         // Use legacy extraction (fallback)
         const result = await this.legacyExtractor.extractContacts(text, options.fileName, options.mimeType, {
@@ -347,6 +372,45 @@ class ExtractionMigrationService {
       metadata: {
         ...backendResult.metadata,
         clientSideContactsMerged: clientSideContacts.length
+      }
+    };
+  }
+
+  /**
+   * Transform unified service result to legacy format
+   */
+  transformUnifiedToLegacy(unifiedResult, extractionId) {
+    const contacts = (unifiedResult.contacts || []).map(contact => ({
+      id: contact.id || `unified_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: contact.name || '',
+      role: contact.role || '',
+      email: contact.email || '',
+      phone: contact.phone || '',
+      company: contact.company || '',
+      department: contact.department || '',
+      notes: contact.notes || '',
+      confidence: contact.confidence || 0.9,
+      source: contact.source || 'unified-ai-first',
+      section: contact.section || 'general'
+    }));
+
+    return {
+      success: unifiedResult.success !== false,
+      contacts,
+      metadata: {
+        extractionId,
+        strategy: unifiedResult.metadata?.strategy || 'unified-ai-first',
+        documentType: 'call_sheet',
+        confidence: unifiedResult.metadata?.confidence || unifiedResult.metadata?.qualityScore || 0.9,
+        processingTime: unifiedResult.metadata?.processingTime || 0,
+        textLength: unifiedResult.metadata?.textLength || 0,
+        tokensUsed: unifiedResult.metadata?.tokensUsed || 0,
+        qualityScore: unifiedResult.metadata?.qualityScore,
+        isEnterprise: true,
+        isUnified: true,
+        isAIFirst: true,
+        patternValidation: unifiedResult.metadata?.patternValidation,
+        clientSideContactsMerged: unifiedResult.metadata?.clientSideContactsMerged || 0
       }
     };
   }

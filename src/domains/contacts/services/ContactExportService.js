@@ -57,19 +57,41 @@ class ContactExportService {
     logger.info(`Found ${contacts.length} contacts to export`);
 
     // Validate and clean before export
-    const { cleaned } = this.validationService.validateAndCleanContacts(contacts, {
+    const validationResult = this.validationService.validateAndCleanContacts(contacts, {
       removeInvalid: true,
       deduplicate: true
     });
 
-    if (cleaned.length === 0) {
+    // ✅ FIX: Ensure validation result has expected structure
+    if (!validationResult || typeof validationResult !== 'object') {
+      throw new Error('Validation service returned invalid result');
+    }
+
+    const cleaned = validationResult.cleaned || validationResult || [];
+
+    if (!Array.isArray(cleaned) || cleaned.length === 0) {
       throw new Error('No valid contacts to export after validation');
     }
 
     logger.info(`Exporting ${cleaned.length} cleaned contacts`);
 
     // Use existing export service for format generation
-    return await this.exportService.exportContacts(cleaned, format, exportOptions);
+    const exportResult = await this.exportService.exportContacts(cleaned, format, exportOptions);
+    
+    // ✅ FIX: Ensure export result has expected structure
+    if (!exportResult || typeof exportResult !== 'object') {
+      throw new Error(`Export service returned invalid result: ${typeof exportResult}`);
+    }
+
+    if (!exportResult.data || !exportResult.filename || !exportResult.mimeType) {
+      throw new Error(`Export service returned incomplete result. Missing: ${[
+        !exportResult.data && 'data',
+        !exportResult.filename && 'filename',
+        !exportResult.mimeType && 'mimeType'
+      ].filter(Boolean).join(', ')}`);
+    }
+
+    return exportResult;
   }
 
   /**
@@ -79,9 +101,10 @@ class ContactExportService {
   async getContactsForExport(userId, { jobId, contactIds }) {
     // STRICT: If jobId provided, ONLY get contacts from that job
     if (jobId && jobId !== 'all') {
-      const jobContacts = await this.contactRepository.findByJobId(jobId);
+      // ✅ SECURITY: Pass userId to repository for server-side filtering
+      const jobContacts = await this.contactRepository.findByJobId(jobId, userId);
       
-      // Security: Filter to user's contacts
+      // Additional client-side filter for safety (should already be filtered by repository)
       let userContacts = jobContacts.filter(c => c.userId === userId);
       
       // If specific contact IDs requested, filter further

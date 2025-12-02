@@ -1,5 +1,5 @@
 const BaseRepository = require('../../../shared/infrastructure/database/base.repository');
-const { DatabaseManager } = require('../../../shared/infrastructure/database/database.manager');
+const db = require('../../../config/database');
 const { Contact } = require('../entities/Contact');
 const { logger } = require('../../../shared/infrastructure/logger/logger.service');
 
@@ -11,7 +11,9 @@ const { logger } = require('../../../shared/infrastructure/logger/logger.service
  */
 class ContactRepository extends BaseRepository {
   constructor() {
-    const prisma = DatabaseManager.getInstance().getClient();
+    // Use lazy-loaded Prisma client from database config
+    // Don't connect during construction - connection happens on first use
+    const prisma = db.getClient();
     super(prisma.contact, prisma);
     logger.info('ContactRepository initialized');
   }

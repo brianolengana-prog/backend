@@ -1,0 +1,26 @@
+{
+  "id": "template",
+  "name": "Template Test Case",
+  "format": "structured",
+  "difficulty": "easy",
+  "text": "PHOTOGRAPHER: John Doe / john@example.com / 555-1234\nHAIR: Jane Smith / jane@example.com / 555-5678",
+  "expectedContacts": [
+    {
+      "name": "John Doe",
+      "role": "PHOTOGRAPHER",
+      "email": "john@example.com",
+      "phone": "555-1234"
+    },
+    {
+      "name": "Jane Smith",
+      "role": "HAIR",
+      "email": "jane@example.com",
+      "phone": "555-5678"
+    }
+  ],
+  "metadata": {
+    "description": "Simple structured format test case",
+    "source": "synthetic"
+  }
+}
+

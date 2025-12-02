@@ -1,9 +1,15 @@
+console.log('📦 Loading modules...');
 const app = require('./app');
+console.log('✅ app.js loaded');
 const db = require('./config/database');
+console.log('✅ database.js loaded');
 const env = require('./config/env');
+console.log('✅ env.js loaded');
 const { startSubscriptionRenewalJob } = require('./jobs/subscription-renewal.job');
+console.log('✅ subscription-renewal.job loaded');
 
 const PORT = env.PORT || 3001;
+console.log('✅ All modules loaded, starting server...');
 
 async function start() {
   try {

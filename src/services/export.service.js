@@ -1,5 +1,5 @@
 const XLSX = require('xlsx');
-const { logger } = require('../utils/logger');
+const logger = require('../utils/logger');
 
 /**
  * Enterprise-grade Contact Export Service
@@ -40,7 +40,16 @@ class ExportService {
           throw new Error(`Unsupported export format: ${format}`);
       }
     } catch (error) {
-      logger.error('❌ Export failed', { error: error.message, format, stack: error.stack });
+      // ✅ FIX: Safe error logging
+      const errorMessage = error?.message || String(error || 'Unknown error');
+      const errorStack = error?.stack || 'No stack trace';
+      
+      try {
+        logger.error('❌ Export failed', { errorMessage, format, errorStack });
+      } catch (logError) {
+        console.error('❌ Export failed (logger error):', errorMessage, format);
+        console.error('Logger error:', logError);
+      }
       throw error;
     }
   }
