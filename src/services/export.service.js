@@ -49,6 +49,11 @@ class ExportService {
    * Generate CSV export
    */
   generateCSV(contacts, options = {}) {
+    // Validate contacts array
+    if (!contacts || contacts.length === 0) {
+      throw new Error('No contacts provided for CSV export');
+    }
+
     const {
       includeFields = ['name', 'email', 'phone', 'role', 'company', 'jobTitle', 'dateAdded'],
       delimiter = ',',
@@ -79,6 +84,7 @@ class ExportService {
       csvContent += headers.join(delimiter) + '\n';
     }
 
+    let rowCount = 0;
     contacts.forEach(contact => {
       const row = includeFields.map(field => {
         let value = '';
@@ -124,10 +130,28 @@ class ExportService {
       });
 
       csvContent += row.join(delimiter) + '\n';
+      rowCount++;
     });
+
+    // Validate CSV content was created
+    if (!csvContent || csvContent.trim().length === 0) {
+      logger.error('CSV content generation failed', {
+        contactCount: contacts.length,
+        rowCount,
+        headersLength: headers.length
+      });
+      throw new Error('Failed to generate CSV content');
+    }
 
     const filename = options.customFileName || 
       `contacts_${contacts.length}_${new Date().toISOString().split('T')[0]}.csv`;
+
+    logger.info('CSV export generated successfully', {
+      filename,
+      rowCount,
+      contentLength: csvContent.length,
+      contactCount: contacts.length
+    });
 
     return {
       data: csvContent,
@@ -292,6 +316,11 @@ class ExportService {
    * Generate JSON export
    */
   generateJSON(contacts, options = {}) {
+    // Validate contacts array
+    if (!contacts || contacts.length === 0) {
+      throw new Error('No contacts provided for JSON export');
+    }
+
     const {
       includeMetadata = true,
       includeJobInfo = true
@@ -330,9 +359,45 @@ class ExportService {
       })
     };
 
-    const jsonContent = JSON.stringify(exportData, null, 2);
+    // Validate export data structure
+    if (!exportData || !exportData.contacts || !Array.isArray(exportData.contacts)) {
+      logger.error('JSON export data structure invalid', {
+        hasExportData: !!exportData,
+        hasContacts: !!exportData?.contacts,
+        contactsIsArray: Array.isArray(exportData?.contacts),
+        contactCount: contacts.length
+      });
+      throw new Error('Failed to generate JSON export data');
+    }
+
+    let jsonContent;
+    try {
+      jsonContent = JSON.stringify(exportData, null, 2);
+    } catch (error) {
+      logger.error('JSON stringify failed', {
+        error: error.message,
+        contactCount: contacts.length
+      });
+      throw new Error('Failed to serialize JSON export data');
+    }
+
+    // Validate JSON content was created
+    if (!jsonContent || jsonContent.length === 0) {
+      logger.error('JSON content is empty', {
+        contactCount: contacts.length,
+        exportDataKeys: Object.keys(exportData)
+      });
+      throw new Error('Generated JSON content is empty');
+    }
+
     const filename = options.customFileName || 
       `contacts_${contacts.length}_${new Date().toISOString().split('T')[0]}.json`;
+
+    logger.info('JSON export generated successfully', {
+      filename,
+      contentLength: jsonContent.length,
+      contactCount: contacts.length
+    });
 
     return {
       data: jsonContent,
@@ -345,6 +410,11 @@ class ExportService {
    * Generate vCard export
    */
   generateVCard(contacts, options = {}) {
+    // Validate contacts array
+    if (!contacts || contacts.length === 0) {
+      throw new Error('No contacts provided for vCard export');
+    }
+
     const vCards = contacts.map(contact => {
       const name = contact.name || 'Unnamed Contact';
       const nameParts = name.split(' ').filter(Boolean);
@@ -380,8 +450,22 @@ class ExportService {
       return vCard.join('\n');
     }).join('\n\n');
 
+    // Validate vCard content was created
+    if (!vCards || vCards.trim().length === 0) {
+      logger.error('vCard content generation failed', {
+        contactCount: contacts.length
+      });
+      throw new Error('Failed to generate vCard content');
+    }
+
     const filename = options.customFileName || 
       `contacts_${contacts.length}_${new Date().toISOString().split('T')[0]}.vcf`;
+
+    logger.info('vCard export generated successfully', {
+      filename,
+      contentLength: vCards.length,
+      contactCount: contacts.length
+    });
 
     return {
       data: vCards,

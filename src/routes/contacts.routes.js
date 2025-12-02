@@ -222,7 +222,7 @@ router.get('/export', async (req, res) => {
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     
-    // Send buffer for Excel, string for others
+    // Send buffer for Excel, string for others (CSV, JSON, vCard)
     if (format.toLowerCase() === 'excel' || format.toLowerCase() === 'xlsx') {
       // data is already a Buffer from XLSX.write(), send it directly
       if (Buffer.isBuffer(data)) {
@@ -253,6 +253,40 @@ router.get('/export', async (req, res) => {
         res.send(Buffer.from(data));
       }
     } else {
+      // CSV, JSON, vCard are strings - validate and send
+      if (typeof data !== 'string') {
+        domainLogger.error('Export data is not a string for text format', {
+          format,
+          dataType: typeof data,
+          isBuffer: Buffer.isBuffer(data),
+          filename,
+          userId: req.user.id
+        });
+        return res.status(500).json({
+          success: false,
+          error: `Export failed: Invalid data type for ${format} format`
+        });
+      }
+
+      if (!data || data.length === 0) {
+        domainLogger.error('Export data is empty for text format', {
+          format,
+          filename,
+          userId: req.user.id
+        });
+        return res.status(500).json({
+          success: false,
+          error: `Export failed: Empty data for ${format} format`
+        });
+      }
+
+      domainLogger.info(`Sending ${format} export`, {
+        format,
+        contentLength: data.length,
+        filename,
+        userId: req.user.id
+      });
+
       res.send(data);
     }
   } catch (error) {
