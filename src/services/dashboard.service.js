@@ -135,6 +135,7 @@ class DashboardService {
       const [
         totalJobs,
         totalContacts,
+        validContacts,
         completedJobsCount,
         failedJobsCount,
         recentJobsData
@@ -142,8 +143,20 @@ class DashboardService {
         // Count total jobs
         prisma.job.count({ where: { userId } }),
         
-        // Count total contacts
+        // Count total contacts (all contacts)
         prisma.contact.count({ where: { userId } }),
+        
+        // ✅ FIX: Count only valid contacts (with email OR phone) - matches Contacts page filter
+        // This matches the requireContact=true filter used in ContactRepository
+        prisma.contact.count({
+          where: {
+            userId,
+            OR: [
+              { email: { not: null, not: '', contains: '@' } },
+              { phone: { not: null, not: '' } }
+            ]
+          }
+        }),
         
         // Count successful jobs
         prisma.job.count({
@@ -184,8 +197,8 @@ class DashboardService {
       const successfulExtractions = completedJobsCount;
       const failedExtractions = failedJobsCount;
 
-      
-      const averageContactsPerJob = totalJobs > 0 ? Math.round((totalContacts / totalJobs) * 100) / 100 : 0;
+      // ✅ FIX: Use validContacts for averages (matches Contacts page behavior)
+      const averageContactsPerJob = totalJobs > 0 ? Math.round((validContacts / totalJobs) * 100) / 100 : 0;
       const successRate = totalJobs > 0 ? Math.round((successfulExtractions / totalJobs) * 100) : 0;
 
       // Calculate recent activity from recentJobsData
@@ -208,7 +221,8 @@ class DashboardService {
 
       const metrics = {
         totalJobs,
-        totalContacts,
+        totalContacts: validContacts, // ✅ FIX: Use validContacts instead of totalContacts (matches Contacts page)
+        validContacts, // Keep for reference
         successfulExtractions,
         failedExtractions,
         averageContactsPerJob,
@@ -224,7 +238,8 @@ class DashboardService {
 
       console.log(`✅ Extraction metrics for user ${userId}:`, {
         jobs: totalJobs,
-        contacts: totalContacts,
+        contacts: validContacts, // ✅ FIX: Log valid contacts count
+        totalContactsRaw: totalContacts, // Keep raw count for debugging
         successRate: `${successRate}%`,
         avgContactsPerJob: averageContactsPerJob
       });
@@ -235,7 +250,8 @@ class DashboardService {
       // Return default values if there's an error
       return {
         totalJobs: 0,
-        totalContacts: 0,
+        totalContacts: 0, // ✅ FIX: This is now validContacts count
+        validContacts: 0,
         successfulExtractions: 0,
         failedExtractions: 0,
         averageContactsPerJob: 0,
