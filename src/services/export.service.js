@@ -164,6 +164,11 @@ class ExportService {
 
     const headers = includeFields.map(field => fieldMap[field] || this.capitalize(field));
 
+    // Validate contacts array
+    if (!contacts || contacts.length === 0) {
+      throw new Error('No contacts provided for Excel export');
+    }
+
     // Transform contacts to rows
     const rows = contacts.map(contact => {
       const row = {};
@@ -213,8 +218,20 @@ class ExportService {
       return row;
     });
 
+    // Validate rows were created
+    if (!rows || rows.length === 0) {
+      throw new Error('Failed to transform contacts to Excel rows');
+    }
+
+    logger.info(`Creating Excel worksheet with ${rows.length} rows and ${headers.length} columns`);
+
     // Create main contacts sheet
     const worksheet = XLSX.utils.json_to_sheet(rows);
+    
+    // Validate worksheet was created
+    if (!worksheet) {
+      throw new Error('Failed to create Excel worksheet');
+    }
     
     // Set column widths
     const colWidths = headers.map(() => ({ wch: 20 }));
@@ -246,6 +263,22 @@ class ExportService {
       bookType: 'xlsx', 
       type: 'buffer',
       cellStyles: true
+    });
+
+    // Validate buffer was created
+    if (!excelBuffer || !Buffer.isBuffer(excelBuffer)) {
+      logger.error('Excel buffer creation failed', {
+        bufferType: typeof excelBuffer,
+        isBuffer: Buffer.isBuffer(excelBuffer),
+        bufferLength: excelBuffer?.length
+      });
+      throw new Error('Failed to generate Excel file buffer');
+    }
+
+    logger.info(`Excel buffer created successfully`, {
+      bufferLength: excelBuffer.length,
+      rowCount: rows.length,
+      filename
     });
 
     return {
