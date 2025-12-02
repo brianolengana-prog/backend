@@ -127,18 +127,25 @@ const shouldStartWorkers = process.env.NODE_ENV === 'production' || process.env.
 
 if (shouldStartWorkers) {
   console.log('🚀 Starting workers...');
-  const workerManager = require('./workers/workerManager');
-  
-  // Start workers after a short delay to ensure app is ready
-  setTimeout(async () => {
-    try {
-      console.log('⏰ Starting workers after delay...');
-      await workerManager.start();
-      console.log('✅ Workers started successfully');
-    } catch (error) {
-      console.error('❌ Failed to start workers:', error);
-    }
-  }, 2000);
+  try {
+    const workerManager = require('./workers/workerManager');
+    
+    // Start workers after a short delay to ensure app is ready
+    setTimeout(async () => {
+      try {
+        console.log('⏰ Starting workers after delay...');
+        await workerManager.start();
+        console.log('✅ Workers started successfully');
+      } catch (error) {
+        console.error('❌ Failed to start workers:', error);
+        console.error('⚠️ Continuing without workers - server will still function');
+      }
+    }, 2000);
+  } catch (error) {
+    console.error('❌ Failed to load worker manager:', error.message);
+    console.error('⚠️ Continuing without workers - server will still function');
+    console.error('⚠️ This is usually due to missing Redis configuration');
+  }
 } else {
   console.log('⚠️ Workers not started - set ENABLE_WORKERS=true to start in development');
 }
@@ -147,8 +154,12 @@ if (shouldStartWorkers) {
 process.on('SIGTERM', async () => {
   console.log('🛑 SIGTERM received, shutting down workers...');
   if (shouldStartWorkers) {
-    const workerManager = require('./workers/workerManager');
-    await workerManager.stop();
+    try {
+      const workerManager = require('./workers/workerManager');
+      await workerManager.stop();
+    } catch (error) {
+      console.error('⚠️ Error stopping workers:', error.message);
+    }
   }
   process.exit(0);
 });
@@ -156,8 +167,12 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
   console.log('🛑 SIGINT received, shutting down workers...');
   if (shouldStartWorkers) {
-    const workerManager = require('./workers/workerManager');
-    await workerManager.stop();
+    try {
+      const workerManager = require('./workers/workerManager');
+      await workerManager.stop();
+    } catch (error) {
+      console.error('⚠️ Error stopping workers:', error.message);
+    }
   }
   process.exit(0);
 });
