@@ -1,17 +1,52 @@
 # Migration Instructions - Add stripeCustomerId to User
 
 ## Issue
-Prisma migrate can't connect to the database because it's trying to use `DIRECT_URL` which may not be configured correctly for Supabase.
+Prisma migrate can't connect to the database because `DIRECT_URL` is pointing to the pooler instead of the direct connection. Prisma migrations require a direct database connection (not through the pooler).
 
-## Solution Options
+## Quick Fix: Apply Migration Manually (Recommended)
 
-### Option 1: Apply Migration Manually (Recommended for Production)
-Since the migration SQL is already generated, you can apply it directly to your database:
+Since this is a simple single-column addition, the easiest solution is to apply it manually:
+
+### Step 1: Run SQL in Supabase Dashboard
+1. Go to your Supabase project dashboard
+2. Navigate to **SQL Editor**
+3. Run this SQL:
 
 ```sql
--- Run this SQL directly in your Supabase SQL editor or database client
 ALTER TABLE "public"."users" ADD COLUMN "stripe_customer_id" TEXT;
 ```
+
+### Step 2: Mark Migration as Applied
+After running the SQL, mark the migration as applied so Prisma knows it's done:
+
+```bash
+cd /home/bkg/parrot/node/backend
+npx prisma migrate resolve --applied 20251202225131_add_stripe_customer_id_to_user
+```
+
+### Step 3: Verify
+Restart your server and test that Stripe customer ID saving works without errors.
+
+---
+
+## Alternative Solutions
+
+### Option 2: Fix DIRECT_URL for Future Migrations
+For Supabase, `DIRECT_URL` should use the direct connection (not pooler):
+
+1. In Supabase dashboard: **Settings → Database**
+2. Find **Connection string** section
+3. Copy the **Direct connection** string (not "Connection pooling")
+4. Update `.env`:
+   ```
+   DIRECT_URL="postgresql://postgres:[PASSWORD]@[DIRECT_HOST]:5432/postgres?sslmode=require"
+   ```
+   Note: The direct connection typically uses a different hostname than the pooler.
+
+5. Then run:
+   ```bash
+   npx prisma migrate deploy
+   ```
 
 ### Option 2: Fix DIRECT_URL
 For Supabase, `DIRECT_URL` should be the direct connection string (not the pooler).
