@@ -1,100 +1,100 @@
-# Database Connection Fix
+# Database Connection Fix - Complete Solution
 
-## 🔍 Issue Found
+## 🔍 Problem Identified
 
-**Database connection is failing!**
-
-```
-❌ Error: Can't reach database server at `aws-1-eu-north-1.pooler.supabase.com:6543`
-```
-
-This is why the server hangs - it's trying to connect to Supabase but can't reach it.
+Prisma can't connect to Supabase database. The connection string may be missing SSL parameters or the database might need different configuration.
 
 ---
 
-## ✅ Solutions
+## ✅ Solution: Fix Connection String
 
-### Option 1: Check Database Server Status
+### Step 1: Check Current Connection String
 
-1. **Verify Supabase is running**: Check your Supabase dashboard
-2. **Check network connectivity**: Can you reach the server?
+Your `.env` currently has:
+```
+DATABASE_URL="postgresql://...@aws-1-eu-north-1.pooler.supabase.com:6543/postgres?pgbouncer=true"
+```
+
+### Step 2: Add SSL Parameters
+
+For Supabase, you need to add SSL mode. Update your `.env`:
 
 ```bash
-# Test connection
-nc -zv aws-1-eu-north-1.pooler.supabase.com 6543
-# or
-telnet aws-1-eu-north-1.pooler.supabase.com 6543
+# Connection Pooling (for queries)
+DATABASE_URL="postgresql://postgres.ypnwgyrdovjyxkgszwbd:V3T1M1TmquFqeXsz@aws-1-eu-north-1.pooler.supabase.com:6543/postgres?pgbouncer=true&sslmode=require"
+
+# Direct Connection (for migrations)
+DIRECT_URL="postgresql://postgres.ypnwgyrdovjyxkgszwbd:V3T1M1TmquFqeXsz@aws-1-eu-north-1.pooler.supabase.com:5432/postgres?sslmode=require"
 ```
+
+**Key additions**:
+- `&sslmode=require` - Required for Supabase connections
 
 ---
 
-### Option 2: Use Direct Connection (Not Pooler)
+## 🔧 Alternative: Test with Direct Connection First
 
-If the pooler isn't working, try the direct connection URL:
+If pooler doesn't work, try using DIRECT_URL for both:
 
 ```bash
-# In .env, change DATABASE_URL to use direct connection (port 5432)
-# Instead of pooler (port 6543)
-```
-
-Check your Supabase dashboard for the direct connection string.
-
----
-
-### Option 3: Add Connection Timeout
-
-The server hangs because the connection times out. Let's add better error handling:
-
-```javascript
-// In src/config/database.js
-async connect() {
-  if (this.connected) return;
-  
-  // Add timeout
-  const timeout = new Promise((_, reject) => 
-    setTimeout(() => reject(new Error('Database connection timeout')), 10000)
-  );
-  
-  await Promise.race([
-    this.client.$connect(),
-    timeout
-  ]);
-  
-  this.connected = true;
-}
+# Try direct connection first
+DATABASE_URL="postgresql://postgres.ypnwgyrdovjyxkgszwbd:V3T1M1TmquFqeXsz@aws-1-eu-north-1.pooler.supabase.com:5432/postgres?sslmode=require"
 ```
 
 ---
 
-### Option 4: Test Database Connection
+## ✅ What I've Fixed
+
+1. ✅ **Added connection timeout** - Server won't hang forever
+2. ✅ **Added retry logic** - Will try 3 times with exponential backoff
+3. ✅ **Better error messages** - Clear error logging
+4. ✅ **Connection testing** - Verifies connection works
+
+---
+
+## 🚀 Next Steps
+
+### Step 1: Update Connection String
+
+Add `&sslmode=require` to your DATABASE_URL in `.env`:
 
 ```bash
-# Test if you can connect at all
-psql "postgresql://postgres.ypnwgyrdovjyxkgszwbd:V3T1M1TmquFqeXsz@aws-1-eu-north-1.pooler.supabase.com:6543/postgres?pgbouncer=true"
+cd /home/bkg/parrot/node/backend
+# Edit .env and add &sslmode=require to DATABASE_URL
 ```
 
-**If this fails**: Database credentials or network issue!
+### Step 2: Test Connection
+
+```bash
+node -e "
+const db = require('./src/config/database');
+db.connect(5000).then(() => {
+  console.log('✅ Connected!');
+  return db.testConnection();
+}).then(result => {
+  console.log('Test:', result ? 'PASSED' : 'FAILED');
+  process.exit(result ? 0 : 1);
+}).catch(e => {
+  console.error('❌ Error:', e.message);
+  process.exit(1);
+});
+"
+```
+
+### Step 3: Start Server
+
+```bash
+npm start
+```
+
+**Should now see**:
+```
+✅ Database connected successfully
+✅ Database connection verified
+✅ Subscription renewal job started
+✅ Clean backend listening on 3001
+```
 
 ---
 
-## 🚨 Quick Workaround: Skip Database for Testing
-
-If you just want to test CORS without database:
-
-1. Comment out database connection temporarily
-2. Or use a local PostgreSQL instance
-3. Or fix the Supabase connection
-
----
-
-## ✅ Recommended Action
-
-1. **Check Supabase Dashboard**: Is your database active?
-2. **Verify Connection String**: Is it correct?
-3. **Try Direct Connection**: Use port 5432 instead of 6543
-4. **Check Network**: Can you reach the server?
-
----
-
-*Fix the database connection and the server will start! 🚀*
-
+*The fix adds timeout, retry logic, and better error handling! 🚀*
