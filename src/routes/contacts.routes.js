@@ -127,13 +127,13 @@ router.get('/', async (req, res) => {
     };
 
     // STRICT: Enforce jobId scoping if provided in query
-    const jobId = req.query.jobId;
+    const queryJobId = req.query.jobId;
     const service = getContactsService(req.user.id);
     
     // STRICT: If jobId in query, enforce strict scoping (don't allow 'all' override)
     const queryOptions = {
       ...options,
-      jobId: jobId && jobId !== 'all' ? jobId : options.jobId
+      jobId: queryJobId && queryJobId !== 'all' ? queryJobId : options.jobId
     };
     
     const result = await service.getContactsPaginated(req.user.id, queryOptions);

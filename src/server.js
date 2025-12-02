@@ -1,3 +1,18 @@
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise);
+  console.error('❌ Reason:', reason);
+  console.error('❌ Stack:', reason?.stack);
+  process.exit(1);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  console.error('❌ Stack:', error.stack);
+  process.exit(1);
+});
+
 const app = require('./app');
 const db = require('./config/database');
 const env = require('./config/env');
