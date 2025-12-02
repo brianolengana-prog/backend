@@ -1,0 +1,36 @@
+{
+  "id": "sunday-times-example",
+  "name": "Sunday Times Format Example",
+  "format": "semi-structured",
+  "difficulty": "medium",
+  "text": "SUNDAY TIMES STYLE – CALL SHEET\nHELENA CHRISTENSEN INTERIORS COVER SHOOT\n\nINTERIORS DIRECTOR\nPHOEBE MCDOWELL / PHOEBE.MCDOWELL@SUNDAYTIMES.CO.UK\n\nPHOTOGRAPHER\nWILLIAM ABRANOWICZ / 646 825 1272 / WAINC@ME.COM\nC/O BECKY LEWIS / 212.206.0737 / BLEWIS@ARTANDCOMMERCE.COM\n\nHAIR\nBEN SKERVIN / +1 (646) 284 2004",
+  "expectedContacts": [
+    {
+      "name": "PHOEBE MCDOWELL",
+      "role": "INTERIORS DIRECTOR",
+      "email": "PHOEBE.MCDOWELL@SUNDAYTIMES.CO.UK"
+    },
+    {
+      "name": "WILLIAM ABRANOWICZ",
+      "role": "PHOTOGRAPHER",
+      "email": "WAINC@ME.COM",
+      "phone": "646 825 1272"
+    },
+    {
+      "name": "BECKY LEWIS",
+      "role": "PHOTOGRAPHER",
+      "email": "BLEWIS@ARTANDCOMMERCE.COM",
+      "phone": "212.206.0737"
+    },
+    {
+      "name": "BEN SKERVIN",
+      "role": "HAIR",
+      "phone": "+1 (646) 284 2004"
+    }
+  ],
+  "metadata": {
+    "description": "Sunday Times format with role on separate line and C/O entries",
+    "source": "real-world"
+  }
+}
+
