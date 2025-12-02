@@ -152,30 +152,10 @@ router.get('/', async (req, res) => {
 });
 
 /**
- * GET /api/contacts/:id
- * Get a specific contact by ID
- */
-router.get('/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    console.log(`📋 Getting contact ${id} for user: ${req.user.id}`);
-    const contact = await contactsService.getContactById(req.user.id, id);
-    res.json({ 
-      success: true, 
-      data: contact 
-    });
-  } catch (error) {
-    console.error('❌ Error getting contact:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to get contact' 
-    });
-  }
-});
-
-/**
  * GET /api/contacts/export
  * Export contacts in multiple formats (CSV, Excel, JSON, vCard)
+ * 
+ * ⚠️ IMPORTANT: This route MUST be defined BEFORE /:id to avoid route conflicts
  * 
  * Query parameters:
  * - ids: Comma-separated contact IDs (optional)
@@ -249,6 +229,31 @@ router.get('/export', async (req, res) => {
 });
 
 /**
+ * GET /api/contacts/:id
+ * Get a specific contact by ID
+ * 
+ * ⚠️ IMPORTANT: This route MUST be defined AFTER /export to avoid route conflicts
+ */
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`📋 Getting contact ${id} for user: ${req.user.id}`);
+    const service = getContactsService(req.user.id);
+    const contact = await service.getContactById(req.user.id, id);
+    res.json({ 
+      success: true, 
+      data: contact 
+    });
+  } catch (error) {
+    console.error('❌ Error getting contact:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to get contact' 
+    });
+  }
+});
+
+/**
  * DELETE /api/contacts/:id
  * Delete a specific contact by ID
  */
@@ -256,7 +261,8 @@ router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     console.log(`🗑️ Deleting contact ${id} for user: ${req.user.id}`);
-    await contactsService.deleteContact(req.user.id, id);
+    const service = getContactsService(req.user.id);
+    await service.deleteContact(req.user.id, id);
     res.json({ 
       success: true, 
       message: 'Contact deleted successfully' 
