@@ -210,12 +210,48 @@ router.get('/export', async (req, res) => {
       exportOptions
     );
     
+    // Validate export result
+    if (!data) {
+      domainLogger.error('Export service returned empty data', { format, userId: req.user.id });
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Export failed: No data returned from export service' 
+      });
+    }
+
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     
     // Send buffer for Excel, string for others
     if (format.toLowerCase() === 'excel' || format.toLowerCase() === 'xlsx') {
-      res.send(Buffer.from(data));
+      // data is already a Buffer from XLSX.write(), send it directly
+      if (Buffer.isBuffer(data)) {
+        domainLogger.info('Sending Excel buffer', { 
+          bufferLength: data.length, 
+          filename,
+          userId: req.user.id 
+        });
+        res.send(data);
+      } else if (data instanceof Uint8Array) {
+        // Handle Uint8Array (alternative buffer type)
+        domainLogger.info('Converting Uint8Array to Buffer for Excel', { 
+          arrayLength: data.length,
+          filename,
+          userId: req.user.id 
+        });
+        res.send(Buffer.from(data));
+      } else {
+        // Fallback: try to convert to buffer
+        domainLogger.error('Excel export data is not a Buffer', { 
+          dataType: typeof data, 
+          isBuffer: Buffer.isBuffer(data),
+          isUint8Array: data instanceof Uint8Array,
+          dataLength: data?.length,
+          filename,
+          userId: req.user.id
+        });
+        res.send(Buffer.from(data));
+      }
     } else {
       res.send(data);
     }
