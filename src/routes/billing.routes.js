@@ -17,7 +17,7 @@ const updateSubscriptionSchema = z.object({
 });
 
 // Create checkout session
-router.post('/create-checkout-session', authenticate, async (req, res) => {
+router.post('/create-checkout-session', authenticateToken, async (req, res) => {
   try {
     const { priceId } = checkoutSchema.parse(req.body);
     const session = await billingService.createCheckoutSession(req.user.userId, priceId);
@@ -28,7 +28,7 @@ router.post('/create-checkout-session', authenticate, async (req, res) => {
 });
 
 // Create customer portal session
-router.post('/create-portal-session', authenticate, async (req, res) => {
+router.post('/create-portal-session', authenticateToken, async (req, res) => {
   try {
     // Get customer info first to get the Stripe customer ID
     const customerInfo = await billingService.getCustomerByUserId(req.user.userId);
@@ -44,7 +44,7 @@ router.post('/create-portal-session', authenticate, async (req, res) => {
 });
 
 // Get customer info by user ID (for frontend compatibility)
-router.get('/customer', authenticate, async (req, res) => {
+router.get('/customer', authenticateToken, async (req, res) => {
   try {
     const customer = await billingService.getCustomerByUserId(req.user.userId);
     res.json({ success: true, ...customer });
@@ -54,7 +54,7 @@ router.get('/customer', authenticate, async (req, res) => {
 });
 
 // Get customer info by customer ID
-router.get('/customer/:customerId', authenticate, async (req, res) => {
+router.get('/customer/:customerId', authenticateToken, async (req, res) => {
   try {
     const customer = await billingService.getCustomer(req.params.customerId);
     res.json({ success: true, customer });
@@ -64,7 +64,7 @@ router.get('/customer/:customerId', authenticate, async (req, res) => {
 });
 
 // Cancel subscription
-router.post('/cancel-subscription', authenticate, async (req, res) => {
+router.post('/cancel-subscription', authenticateToken, async (req, res) => {
   try {
     const { subscriptionId } = req.body;
     if (!subscriptionId) return res.status(400).json({ success: false, error: 'Subscription ID required' });
@@ -76,7 +76,7 @@ router.post('/cancel-subscription', authenticate, async (req, res) => {
 });
 
 // Update subscription
-router.post('/update-subscription', authenticate, async (req, res) => {
+router.post('/update-subscription', authenticateToken, async (req, res) => {
   try {
     const { subscriptionId, priceId } = { ...req.body, ...updateSubscriptionSchema.parse(req.body) };
     if (!subscriptionId) return res.status(400).json({ success: false, error: 'Subscription ID required' });
@@ -88,7 +88,7 @@ router.post('/update-subscription', authenticate, async (req, res) => {
 });
 
 // Get billing history
-router.get('/billing-history/:customerId', authenticate, async (req, res) => {
+router.get('/billing-history/:customerId', authenticateToken, async (req, res) => {
   try {
     const history = await billingService.getBillingHistory(req.params.customerId);
     res.json({ success: true, history });
@@ -98,7 +98,7 @@ router.get('/billing-history/:customerId', authenticate, async (req, res) => {
 });
 
 // Get payment methods
-router.get('/payment-methods/:customerId', authenticate, async (req, res) => {
+router.get('/payment-methods/:customerId', authenticateToken, async (req, res) => {
   try {
     const methods = await billingService.getPaymentMethods(req.params.customerId);
     res.json({ success: true, methods });
