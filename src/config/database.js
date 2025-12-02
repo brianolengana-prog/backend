@@ -10,8 +10,21 @@ class Database {
 
   async connect() {
     if (this.connected) return;
-    await this.client.$connect();
-    this.connected = true;
+    
+    try {
+      console.log('🔄 Attempting database connection...');
+      await this.client.$connect();
+      this.connected = true;
+      console.log('✅ Database connection established');
+    } catch (error) {
+      console.error('❌ Database connection failed:', error.message);
+      console.error('❌ Error details:', {
+        name: error.name,
+        code: error.code,
+        meta: error.meta
+      });
+      throw error;
+    }
   }
 
   async disconnect() {
