@@ -1,31 +1,69 @@
+console.log('📦 app.js: Loading dependencies...');
 const express = require('express');
+console.log('✅ express loaded');
 const cors = require('cors');
+console.log('✅ cors loaded');
 const helmet = require('helmet');
+console.log('✅ helmet loaded');
 const compression = require('compression');
+console.log('✅ compression loaded');
 const rateLimit = require('express-rate-limit');
+console.log('✅ rateLimit loaded');
 const { requestId } = require('./middleware/requestId');
+console.log('✅ requestId loaded');
 const { notFound, errorHandler } = require('./middleware/error');
+console.log('✅ error middleware loaded');
 const { authLimiter, extractionLimiter, billingLimiter } = require('./middleware/rateLimiters');
+console.log('✅ rateLimiters loaded');
 const env = require('./config/env');
+console.log('✅ env loaded');
 const db = require('./config/database');
+console.log('✅ database loaded');
 const fs = require('fs');
 const path = require('path');
+console.log('📦 Loading routes...');
 const authRoutes = require('./routes/auth.routes');
+// New domain-driven auth routes (feature flag controlled)
+let newAuthRoutes = null;
+try {
+  newAuthRoutes = require('./domains/auth/routes/auth.routes');
+} catch (error) {
+  console.warn('⚠️ New auth routes not available:', error.message);
+}
+console.log('✅ auth.routes loaded');
 const googleAuthRoutes = require('./routes/googleAuth.routes');
+console.log('✅ googleAuth.routes loaded');
 const subscriptionRoutes = require('./routes/subscription.routes');
+console.log('✅ subscription.routes loaded');
 const billingRoutes = require('./routes/billing.routes');
+console.log('✅ billing.routes loaded');
 const stripeRoutes = require('./routes/stripe.routes');
+console.log('✅ stripe.routes loaded');
 const extractionRoutes = require('./routes/extraction.routes');
+console.log('✅ extraction.routes loaded');
 const textExtractionRoutes = require('./routes/textExtraction.routes');
+console.log('✅ textExtraction.routes loaded');
 const jobsRoutes = require('./routes/jobs.routes');
+console.log('✅ jobs.routes loaded');
 const usageRoutes = require('./routes/usage.routes');
+console.log('✅ usage.routes loaded');
 const dashboardRoutes = require('./routes/dashboard.routes');
+console.log('✅ dashboard.routes loaded');
 const dashboardAggregatedRoutes = require('./routes/dashboard-aggregated.routes');
+console.log('✅ dashboard-aggregated.routes loaded');
 const dashboardOptimizedRoutes = require('./routes/dashboard-optimized.routes');
+console.log('✅ dashboard-optimized.routes loaded');
 const upgradeWorkflowRoutes = require('./routes/upgradeWorkflow.routes');
+console.log('✅ upgradeWorkflow.routes loaded');
 const contactsRoutes = require('./routes/contacts.routes');
+console.log('✅ contacts.routes loaded');
 const supportRoutes = require('./routes/support.routes');
+console.log('✅ support.routes loaded');
+const evaluationRoutes = require('./domains/evaluation/routes/evaluation.routes');
+console.log('✅ evaluation.routes loaded');
 const extractionV2Routes = require('./routes/extraction-v2.routes');
+console.log('✅ extraction-v2.routes loaded');
+console.log('✅ All routes loaded');
 
 const app = express();
 
@@ -86,7 +124,8 @@ app.get('/', (req, res) => {
   res.json({ status: 'OK', service: 'Clean Backend', ts: new Date().toISOString() });
 });
 
-app.get('/api/health', async (req, res) => {
+// Health check endpoint (both /health and /api/health for compatibility)
+const healthCheck = async (req, res) => {
   try {
     await db.connect();
     await db.getClient().$queryRaw`SELECT 1`;
@@ -94,9 +133,25 @@ app.get('/api/health', async (req, res) => {
   } catch (e) {
     res.status(500).json({ status: 'ERROR', error: e.message });
   }
-});
+};
 
-app.use('/api/auth', authLimiter, authRoutes);
+app.get('/health', healthCheck);
+app.get('/api/health', healthCheck);
+
+// Use new auth routes if feature flag enabled, otherwise use legacy
+const useNewAuth = process.env.USE_NEW_AUTH === 'true' && newAuthRoutes !== null;
+
+if (useNewAuth) {
+  app.use('/api/auth', authLimiter, newAuthRoutes);
+  console.log('✅ Using new domain-driven auth routes');
+} else {
+  app.use('/api/auth', authLimiter, authRoutes);
+  if (newAuthRoutes === null) {
+    console.log('✅ Using legacy auth routes (new routes not available)');
+  } else {
+    console.log('✅ Using legacy auth routes (feature flag disabled)');
+  }
+}
 app.use('/api/google-auth', authLimiter, googleAuthRoutes);
 app.use('/api/subscription', billingLimiter, subscriptionRoutes);
 app.use('/api/billing', billingLimiter, billingRoutes);
@@ -112,6 +167,7 @@ app.use('/api/dashboard', dashboardOptimizedRoutes); // Optimized single endpoin
 app.use('/api/upgrade', upgradeWorkflowRoutes);
 app.use('/api/contacts', contactsRoutes);
 app.use('/api/support', supportRoutes); // Support email service
+app.use('/api/evaluation', extractionLimiter, evaluationRoutes); // Extraction evaluation routes
 
 app.use(notFound);
 app.use(errorHandler);

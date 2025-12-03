@@ -93,16 +93,19 @@ class OptimizedAIUsageService {
       }
 
       // Step 1: Determine if AI is needed
-      const needsAI = this.shouldUseAI(text, patternResults, options);
+      // ✅ FIX: Check for forceAI flag to bypass confidence check
+      const forceAI = options.forceAI === true;
+      const needsAI = forceAI || this.shouldUseAI(text, patternResults, options);
       
       logger.info('🤔 AI decision analysis', {
         patternConfidence: patternResults.confidence || 0,
         threshold: options.confidenceThreshold || this.config.confidenceThreshold,
         needsAI,
+        forceAI,
         contactCount: patternResults.contacts?.length || 0
       });
       
-      if (!needsAI) {
+      if (!needsAI && !forceAI) {
         this.stats.patternRequests++;
         logger.info('🎯 Using pattern results only (high confidence)');
         
@@ -121,11 +124,16 @@ class OptimizedAIUsageService {
         this.cacheResult(cacheKey, result);
         return result;
       }
+      
+      if (forceAI) {
+        logger.info('🚀 Forcing AI usage (forceAI flag set)');
+      }
 
       // Step 2: Identify specific AI tasks needed
       const aiTasks = this.identifyAITasks(text, patternResults);
       
-      if (aiTasks.length === 0) {
+      // ✅ FIX: When forceAI is true, always use AI even if no tasks identified
+      if (aiTasks.length === 0 && !forceAI) {
         logger.info('🎯 No AI tasks identified - using pattern results');
         this.stats.patternRequests++;
         
@@ -143,6 +151,12 @@ class OptimizedAIUsageService {
         
         this.cacheResult(cacheKey, result);
         return result;
+      }
+      
+      // ✅ If forceAI is true but no tasks identified, force a full extraction task
+      if (forceAI && aiTasks.length === 0) {
+        logger.info('🚀 ForceAI enabled but no tasks - forcing full extraction');
+        aiTasks.push('full_extraction');
       }
 
       // Step 3: Execute optimized AI processing
@@ -242,11 +256,31 @@ class OptimizedAIUsageService {
       !contact.email && !contact.phone
     );
     
-    if (hasIncompleteContacts) {
-      logger.info('🔍 Incomplete contacts detected - using AI', { 
-        incompleteContacts: patternResults.contacts?.filter(c => !c.email && !c.phone).length 
+    // ✅ FIX: Check for obviously invalid contacts (like "AM", "PM", very short names, etc.)
+    const hasInvalidContacts = patternResults.contacts?.some(contact => {
+      const name = (contact.name || '').trim().toUpperCase();
+      // Check for common false positives
+      const invalidNames = ['AM', 'PM', 'C/O', 'CO', 'A', 'P', 'M'];
+      const isInvalidName = invalidNames.includes(name) || 
+                           name.length < 3 || 
+                           name.length > 100 ||
+                           /^\d+$/.test(name); // All numbers
+      
+      // Check for contacts that are clearly not names (like long sentences)
+      const isSentence = name.split(' ').length > 8;
+      
+      return isInvalidName || isSentence;
+    });
+    
+    if (hasIncompleteContacts || hasInvalidContacts) {
+      logger.info('🔍 Incomplete or invalid contacts detected - using AI', { 
+        incompleteContacts: patternResults.contacts?.filter(c => !c.email && !c.phone).length,
+        invalidContacts: patternResults.contacts?.filter(c => {
+          const name = (c.name || '').trim().toUpperCase();
+          return ['AM', 'PM', 'C/O'].includes(name) || name.length < 3;
+        }).length
       });
-      return true; // Incomplete contacts - AI can help
+      return true; // Incomplete or invalid contacts - AI can help
     }
 
     // Check if we have very few contacts for the document length
@@ -364,6 +398,9 @@ class OptimizedAIUsageService {
       // Single task - use specific optimized prompt
       const task = aiTasks[0];
       switch (task) {
+        case 'full_extraction':
+          // ✅ Full extraction using entire text
+          return await this.fullExtractionCall(text);
         case 'contextAnalysis':
           return await this.contextAnalysisCall(text);
         case 'dataCleaning':
@@ -423,6 +460,133 @@ class OptimizedAIUsageService {
       
       throw new Error(`Invalid AI response format: ${error.message}`);
     }
+  }
+
+  /**
+   * Full extraction call - uses entire text for complete extraction
+   */
+  async fullExtractionCall(text) {
+    logger.info('🚀 Performing full AI extraction on entire document', {
+      textLength: text.length
+    });
+    
+    // Use entire text for full extraction (chunk if needed)
+    const maxChunkSize = 8000; // GPT-4o-mini can handle ~8k tokens
+    let contacts = [];
+    
+    if (text.length > maxChunkSize) {
+      // Split into chunks and process each
+      const chunks = [];
+      for (let i = 0; i < text.length; i += maxChunkSize) {
+        chunks.push(text.substring(i, i + maxChunkSize));
+      }
+      
+      logger.info(`📄 Processing ${chunks.length} chunks for full extraction`);
+      
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkContacts = await this.extractContactsFromChunk(chunks[i], i + 1, chunks.length);
+        contacts.push(...chunkContacts);
+      }
+    } else {
+      // Single chunk - process entire text
+      contacts = await this.extractContactsFromChunk(text, 1, 1);
+    }
+    
+    // Remove duplicates
+    const uniqueContacts = this.deduplicateContacts(contacts);
+    
+    logger.info('✅ Full extraction completed', {
+      contactsFound: uniqueContacts.length,
+      originalCount: contacts.length
+    });
+    
+    return {
+      success: true,
+      contacts: uniqueContacts,
+      strategy: 'full-extraction',
+      confidence: 0.9,
+      tokensUsed: Math.ceil(text.length / 4) // Rough estimate
+    };
+  }
+  
+  /**
+   * Extract contacts from a single chunk of text
+   */
+  async extractContactsFromChunk(textChunk, chunkNumber, totalChunks) {
+    const prompt = `Extract all contacts from this call sheet/production document. 
+
+Document text:
+${textChunk}
+
+${totalChunks > 1 ? `(This is chunk ${chunkNumber} of ${totalChunks})` : ''}
+
+Extract contacts with:
+- Full name (first and last name)
+- Role (PHOTOGRAPHER, HAIR, MAKEUP, STYLIST, etc.)
+- Email address (if present)
+- Phone number (if present)
+- Company (if mentioned)
+
+Format: Return JSON array of contacts:
+[
+  {
+    "name": "Full Name",
+    "role": "Role",
+    "email": "email@example.com",
+    "phone": "+1 234 567 8900",
+    "company": "Company Name"
+  }
+]
+
+Only extract real contacts with names. Ignore:
+- Single letters (A, B, AM, PM)
+- Long sentences or paragraphs
+- Headers or labels without actual contact info
+- Text that doesn't contain names`;
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: this.config.model,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert at extracting contact information from production documents and call sheets. Return only valid JSON array of contacts.'
+          },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 4000, // Increased for full extraction
+        temperature: 0.1 // Low temperature for consistent extraction
+      });
+
+      const tokensUsed = response.usage?.total_tokens || 0;
+      const aiResponse = this.parseAIResponse(response.choices[0].message.content);
+      
+      return aiResponse.contacts || aiResponse || [];
+    } catch (error) {
+      logger.error('❌ Full extraction chunk failed', {
+        chunkNumber,
+        error: error.message
+      });
+      return [];
+    }
+  }
+  
+  /**
+   * Deduplicate contacts by name and email/phone
+   */
+  deduplicateContacts(contacts) {
+    const seen = new Set();
+    const unique = [];
+    
+    for (const contact of contacts) {
+      const key = `${(contact.name || '').toLowerCase()}-${contact.email || contact.phone || ''}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(contact);
+      }
+    }
+    
+    return unique;
   }
 
   /**

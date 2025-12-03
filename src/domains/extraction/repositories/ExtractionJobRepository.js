@@ -8,23 +8,14 @@
  * Best Practice: Domain-specific queries in repository
  */
 const BaseRepository = require('../../../shared/infrastructure/database/base.repository');
-const databaseManager = require('../../../shared/infrastructure/database/database.manager');
+const db = require('../../../config/database');
 const ExtractionJob = require('../entities/ExtractionJob');
 
 class ExtractionJobRepository extends BaseRepository {
   constructor() {
-    // Initialize with model name
-    super('job', null);
-    this.initializePrisma();
-  }
-
-  /**
-   * Initialize Prisma client from database manager
-   * @private
-   */
-  async initializePrisma() {
-    this.prisma = await databaseManager.getClient();
-    this.model = this.prisma.job;
+    // Use lazy-loaded Prisma client from database config
+    const prisma = db.getClient();
+    super('job', prisma);
   }
 
   /**
@@ -34,7 +25,6 @@ class ExtractionJobRepository extends BaseRepository {
    * @returns {Promise<ExtractionJob|null>} ExtractionJob entity or null
    */
   async findByIdAsEntity(id, include = null) {
-    await this.initializePrisma();
     const job = await this.findById(id, include);
     return job ? ExtractionJob.fromPrisma(job) : null;
   }
@@ -46,8 +36,6 @@ class ExtractionJobRepository extends BaseRepository {
    * @returns {Promise<object>} Jobs and pagination info
    */
   async findByUserId(userId, options = {}) {
-    await this.initializePrisma();
-    
     const {
       page = 1,
       limit = 20,
@@ -106,8 +94,6 @@ class ExtractionJobRepository extends BaseRepository {
    * @returns {Promise<ExtractionJob|null>} Recent job or null
    */
   async findRecentByFileHash(userId, fileHash, maxAge = 24 * 60 * 60 * 1000) {
-    await this.initializePrisma();
-    
     const since = new Date(Date.now() - maxAge);
     
     const job = await this.model.findFirst({
@@ -138,7 +124,6 @@ class ExtractionJobRepository extends BaseRepository {
    * @returns {Promise<ExtractionJob>} Created job entity
    */
   async createAsEntity(data) {
-    await this.initializePrisma();
     const job = await this.create(data);
     return ExtractionJob.fromPrisma(job);
   }
@@ -151,7 +136,6 @@ class ExtractionJobRepository extends BaseRepository {
    * @returns {Promise<ExtractionJob>} Updated job entity
    */
   async updateStatus(id, status, additionalData = {}) {
-    await this.initializePrisma();
     const job = await this.update(id, {
       status,
       ...additionalData
@@ -190,8 +174,6 @@ class ExtractionJobRepository extends BaseRepository {
    * @returns {Promise<object>} Statistics object
    */
   async getStats(userId, days = 30) {
-    await this.initializePrisma();
-    
     const since = new Date();
     since.setDate(since.getDate() - days);
 

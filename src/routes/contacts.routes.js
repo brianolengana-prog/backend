@@ -126,8 +126,6 @@ router.get('/', async (req, res) => {
       requireContact
     };
 
-    // STRICT: Enforce jobId scoping if provided in query
-    const queryJobId = req.query.jobId;
     const service = getContactsService(req.user.id);
     
     // STRICT: If jobId in query, enforce strict scoping (don't allow 'all' override)
@@ -164,6 +162,8 @@ router.get('/', async (req, res) => {
  * - includeFields: Comma-separated fields to include (optional)
  * - delimiter: CSV delimiter: ',' or ';' (optional, CSV only)
  * - customFileName: Custom filename (optional)
+ * 
+ * ⚠️ IMPORTANT: This route MUST be defined BEFORE /:id to avoid route conflicts
  */
 router.get('/export', async (req, res) => {
   try {
@@ -202,7 +202,15 @@ router.get('/export', async (req, res) => {
     // STRICT: Use new export service with validation
     const service = getContactsService(req.user.id);
     
-    const { data, filename, mimeType } = await service.exportContacts(
+    console.log('📤 Starting export', {
+      userId: req.user.id,
+      format: normalizedFormat,
+      jobId,
+      contactIds: contactIds?.length || 0,
+      options: Object.keys(exportOptions)
+    });
+    
+    const result = await service.exportContacts(
       req.user.id, 
       contactIds, 
       normalizedFormat, 
@@ -210,15 +218,20 @@ router.get('/export', async (req, res) => {
       exportOptions
     );
     
-    // Validate export result
-    if (!data) {
-      domainLogger.error('Export service returned empty data', { format, userId: req.user.id });
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Export failed: No data returned from export service' 
-      });
+    console.log('✅ Export result:', {
+      hasData: !!result?.data,
+      hasFilename: !!result?.filename,
+      hasMimeType: !!result?.mimeType,
+      dataType: typeof result?.data,
+      dataLength: result?.data?.length || 'N/A'
+    });
+    
+    if (!result || !result.data || !result.filename || !result.mimeType) {
+      throw new Error(`Invalid export result: ${JSON.stringify(result)}`);
     }
-
+    
+    const { data, filename, mimeType } = result;
+    
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     
@@ -290,10 +303,15 @@ router.get('/export', async (req, res) => {
       res.send(data);
     }
   } catch (error) {
-    console.error('❌ Error exporting contacts:', error);
-    const errorMessage = error && typeof error === 'object' && error.message 
-      ? error.message 
-      : (typeof error === 'string' ? error : 'Failed to export contacts');
+    console.error('❌ Error exporting contacts:', {
+      message: error?.message,
+      stack: error?.stack,
+      error: error,
+      errorType: typeof error,
+      errorKeys: error ? Object.keys(error) : []
+    });
+    
+    const errorMessage = error?.message || error?.toString() || 'Failed to export contacts';
     
     res.status(500).json({ 
       success: false, 

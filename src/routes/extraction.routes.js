@@ -489,11 +489,24 @@ router.post('/upload', smartRateLimit('fileUpload'), upload.single('file'), asyn
           maxProcessingTime: 15000
         });
 
+        // ✅ GRACEFUL TIMEOUT: Longer timeout for DOCX/XLSX files (they take longer)
+        // DOCX/XLSX files require server-side text extraction which is slower
+        const isWordOrExcelFile = req.file.mimetype.includes('word') || 
+                                   req.file.mimetype.includes('excel') ||
+                                   req.file.mimetype.includes('spreadsheet') ||
+                                   req.file.originalname.match(/\.(docx?|xlsx?)$/i);
+        
+        const timeoutDuration = isWordOrExcelFile ? 90000 : 45000; // 90s for DOCX/XLSX, 45s for others
+        
         const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Extraction timeout - file too large or complex')), 30000);
+          setTimeout(() => reject(new Error('Extraction timeout - file processing is taking longer than expected. Please try again or contact support if this persists.')), timeoutDuration);
         });
 
-        console.log('🚀 Starting extraction with timeout protection...');
+        console.log(`🚀 Starting extraction with timeout protection (${timeoutDuration}ms timeout)...`, {
+          fileName: req.file.originalname,
+          mimeType: req.file.mimetype,
+          isWordOrExcel: isWordOrExcelFile
+        });
         return await Promise.race([extractionPromise, timeoutPromise]);
       },
       {

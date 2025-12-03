@@ -398,9 +398,17 @@ class UsageService {
    */
   async canPerformAction(userId, actionType, quantity = 1) {
     try {
-      // 🧪 TESTING MODE: Bypass upload limits when DISABLE_UPLOAD_LIMITS=true
-      if (process.env.DISABLE_UPLOAD_LIMITS === 'true') {
-        console.log('🧪 TESTING MODE: Upload limits disabled');
+      // 🧪 TESTING MODE: Bypass upload limits
+      // Option 1: Set environment variable DISABLE_UPLOAD_LIMITS=true
+      // Option 2: Temporarily set TEMP_DISABLE_UPLOAD_LIMITS to true below
+      const TEMP_DISABLE_UPLOAD_LIMITS = true; // ⚠️ TEMPORARY: Set to false to re-enable limits
+      
+      const disableLimits = TEMP_DISABLE_UPLOAD_LIMITS || 
+                           process.env.DISABLE_UPLOAD_LIMITS === 'true' || 
+                           process.env.DISABLE_UPLOAD_LIMITS === '1';
+      
+      if (disableLimits) {
+        console.log('🧪 TESTING MODE: Upload limits disabled (temporary bypass enabled)');
         return {
           canPerform: true,
           reason: null,

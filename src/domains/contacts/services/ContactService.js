@@ -157,7 +157,8 @@ class ContactService {
     const stats = await this.contactRepository.getStats(userId);
 
     // Get jobs with contacts (need to access Prisma model)
-    const prisma = require('../../../config/database').getClient();
+    const db = require('../../../config/database');
+    const prisma = db.getClient();
     const jobsWithContacts = await prisma.job.findMany({
       where: {
         userId,

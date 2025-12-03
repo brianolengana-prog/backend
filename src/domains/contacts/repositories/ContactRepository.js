@@ -11,8 +11,10 @@ const { logger } = require('../../../shared/infrastructure/logger/logger.service
  */
 class ContactRepository extends BaseRepository {
   constructor() {
+    // Use lazy-loaded Prisma client from database config
+    // Don't connect during construction - connection happens on first use
     const prisma = db.getClient();
-    super('contact', prisma);
+    super(prisma.contact, prisma);
     logger.info('ContactRepository initialized');
   }
 

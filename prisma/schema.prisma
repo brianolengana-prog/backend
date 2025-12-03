@@ -1,6 +1,3 @@
-// Prisma schema for Call Sheet Management System
-// Connected to Supabase PostgreSQL database
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,146 +5,127 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL") // Optional: For Supabase connection pooling
+  directUrl = env("DIRECT_URL")
 }
 
-// ========================================
-// AUTHENTICATION & USER MANAGEMENT
-// ========================================
-
 model User {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email             String    @unique
-  name              String
-  passwordHash      String?   @map("password_hash")
-  provider          String    @default("email")
-  providerId        String?   @map("provider_id")
-  emailVerified     Boolean   @default(false) @map("email_verified")
-  twoFactorEnabled  Boolean   @default(false) @map("two_factor_enabled")
-  twoFactorSecret   String?   @map("two_factor_secret")
-  loginAttempts     Int       @default(0) @map("login_attempts")
-  lockedUntil       DateTime? @map("locked_until")
-  lastLoginAt       DateTime? @map("last_login_at")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
-
-  // Relations
-  passwordResetTokens PasswordResetToken[]
+  id                      String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                   String                   @unique
+  name                    String
+  passwordHash            String?                  @map("password_hash")
+  provider                String                   @default("email")
+  providerId              String?                  @map("provider_id")
+  emailVerified           Boolean                  @default(false) @map("email_verified")
+  twoFactorEnabled        Boolean                  @default(false) @map("two_factor_enabled")
+  twoFactorSecret         String?                  @map("two_factor_secret")
+  loginAttempts           Int                      @default(0) @map("login_attempts")
+  lockedUntil             DateTime?                @map("locked_until")
+  lastLoginAt             DateTime?                @map("last_login_at")
+  createdAt               DateTime                 @default(now()) @map("created_at")
+  updatedAt               DateTime                 @updatedAt @map("updated_at")
+  stripeCustomerId        String?                  @map("stripe_customer_id")
   emailVerificationTokens EmailVerificationToken[]
-  twoFactorCodes    TwoFactorCode[]
-  securityAuditLogs SecurityAuditLog[]
-  sessions          Session[]
-  usage             Usage[]
+  passwordResetTokens     PasswordResetToken[]
+  securityAuditLogs       SecurityAuditLog[]
+  sessions                Session[]
+  twoFactorCodes          TwoFactorCode[]
+  usage                   Usage[]
 
   @@map("users")
 }
 
-// User profiles (extends Supabase auth.users)
 model Profile {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String   @unique @map("user_id") @db.Uuid
-  displayName String?  @map("display_name")
-  avatarUrl   String?  @map("avatar_url")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  // Relations
-  jobs        Job[]
-  contacts    Contact[]
-  productions Production[]
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String       @unique @map("user_id") @db.Uuid
+  displayName String?      @map("display_name")
+  avatarUrl   String?      @map("avatar_url")
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
   callSheets  CallSheet[]
+  contacts    Contact[]
+  jobs        Job[]
+  productions Production[]
 
   @@map("profiles")
 }
 
-// Jobs table for call sheet processing
 model Job {
-  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId           String   @map("user_id") @db.Uuid
-  title            String
-  fileName         String?  @map("file_name")
-  fileUrl          String?  @map("file_url")
-  fileHash         String?  @map("file_hash") @db.VarChar(64)  // SHA-256 hash for deduplication
-  fileSize         Int?     @map("file_size")  // File size in bytes
-  status           JobStatus @default(PROCESSING)
-  processedContacts Json?   @map("processed_contacts")
-  productionId     String?  @map("production_id") @db.Uuid
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String      @map("user_id") @db.Uuid
+  title             String
+  fileName          String?     @map("file_name")
+  fileUrl           String?     @map("file_url")
+  status            JobStatus   @default(PROCESSING)
+  processedContacts Json?       @map("processed_contacts")
+  productionId      String?     @map("production_id") @db.Uuid
+  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  fileHash          String?     @map("file_hash") @db.VarChar(64)
+  fileSize          Int?        @map("file_size")
+  contacts          Contact[]
+  production        Production? @relation(fields: [productionId], references: [id])
+  profile           Profile     @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
-  // Relations
-  profile    Profile     @relation(fields: [userId], references: [userId], onDelete: Cascade)
-  contacts   Contact[]
-  production Production? @relation(fields: [productionId], references: [id], onDelete: SetNull)
-
-  // Indexes for performance
   @@index([userId, fileHash])
   @@index([userId, status, createdAt(sort: Desc)])
   @@index([fileHash, createdAt(sort: Desc)])
-
   @@map("jobs")
 }
 
-// Contacts extracted from call sheets
 model Contact {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  jobId       String   @map("job_id") @db.Uuid
-  userId      String   @map("user_id") @db.Uuid
-  name        String
-  email       String?
-  phone       String?
-  role        String?
-  company     String?
-  isSelected  Boolean  @default(true) @map("is_selected")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  jobId      String   @map("job_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  name       String
+  email      String?
+  phone      String?
+  role       String?
+  company    String?
+  isSelected Boolean  @default(true) @map("is_selected")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  job        Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  profile    Profile  @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
-  // Relations
-  profile Profile @relation(fields: [userId], references: [userId], onDelete: Cascade)
-  job     Job     @relation(fields: [jobId], references: [id], onDelete: Cascade)
-
+  @@index([jobId], map: "contacts_jobId_idx")
+  @@index([name])
+  @@index([role])
+  @@index([userId, createdAt(sort: Desc)], map: "contacts_userId_createdAt_idx")
+  @@index([userId], map: "contacts_userId_idx")
+  @@index([userId, jobId], map: "contacts_userId_jobId_idx")
+  @@index([userId, role], map: "contacts_userId_role_idx")
   @@map("contacts")
 }
 
-// Productions/Projects
 model Production {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String   @map("user_id") @db.Uuid
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String      @map("user_id") @db.Uuid
   name        String
   description String?
-  status      String   @default("active")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  // Relations
-  profile    Profile    @relation(fields: [userId], references: [userId], onDelete: Cascade)
-  callSheets CallSheet[]
-  jobs       Job[]
+  status      String      @default("active")
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  callSheets  CallSheet[]
+  jobs        Job[]
+  profile     Profile     @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@map("productions")
 }
 
-// Call Sheets
 model CallSheet {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId       String   @map("user_id") @db.Uuid
-  productionId String   @map("production_id") @db.Uuid
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String     @map("user_id") @db.Uuid
+  productionId String     @map("production_id") @db.Uuid
   title        String
-  shootDate    String   @map("shoot_date")
+  shootDate    String     @map("shoot_date")
   location     String?
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  // Relations
-  profile    Profile    @relation(fields: [userId], references: [userId], onDelete: Cascade)
-  production Production @relation(fields: [productionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  production   Production @relation(fields: [productionId], references: [id], onDelete: Cascade)
+  profile      Profile    @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@map("call_sheets")
 }
-
-// ========================================
-// AUTHENTICATION TOKENS
-// ========================================
 
 model PasswordResetToken {
   id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -156,9 +134,7 @@ model PasswordResetToken {
   expiresAt DateTime @map("expires_at")
   used      Boolean  @default(false)
   createdAt DateTime @default(now()) @map("created_at")
-
-  // Relations
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("password_reset_tokens")
 }
@@ -170,9 +146,7 @@ model EmailVerificationToken {
   expiresAt DateTime @map("expires_at")
   used      Boolean  @default(false)
   createdAt DateTime @default(now()) @map("created_at")
-
-  // Relations
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("email_verification_tokens")
 }
@@ -184,9 +158,7 @@ model TwoFactorCode {
   expiresAt DateTime @map("expires_at")
   used      Boolean  @default(false)
   createdAt DateTime @default(now()) @map("created_at")
-
-  // Relations
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("two_factor_codes")
 }
@@ -200,9 +172,7 @@ model SecurityAuditLog {
   success   Boolean
   details   Json?
   createdAt DateTime @default(now()) @map("created_at")
-
-  // Relations
-  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user      User?    @relation(fields: [userId], references: [id])
 
   @@map("security_audit_log")
 }
@@ -218,46 +188,38 @@ model Session {
   userAgent    String?  @map("user_agent")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("sessions")
 }
 
 model Usage {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId        String   @map("user_id") @db.Uuid
-  month         String   // YYYY-MM format
-  jobsProcessed Int      @default(0) @map("jobs_processed")
-  contactsExtracted Int  @default(0) @map("contacts_extracted")
-  apiCalls      Int      @default(0) @map("api_calls")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String   @map("user_id") @db.Uuid
+  month             String
+  jobsProcessed     Int      @default(0) @map("jobs_processed")
+  contactsExtracted Int      @default(0) @map("contacts_extracted")
+  apiCalls          Int      @default(0) @map("api_calls")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, month])
   @@map("usage")
 }
 
-// ========================================
-// EXISTING BILLING TABLES
-// ========================================
-
 model Subscription {
-  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId            String            @map("user_id") @db.Uuid
-  stripeCustomerId  String            @map("stripe_customer_id")
-  stripeSubscriptionId String?        @unique @map("stripe_subscription_id")
-  status            String
-  priceId           String            @map("price_id")
-  currentPeriodStart DateTime         @map("current_period_start") @db.Timestamptz(6)
-  currentPeriodEnd   DateTime         @map("current_period_end") @db.Timestamptz(6)
-  cancelAtPeriodEnd  Boolean          @default(false) @map("cancel_at_period_end")
-  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String   @map("user_id") @db.Uuid
+  stripeCustomerId     String   @map("stripe_customer_id")
+  stripeSubscriptionId String?  @unique @map("stripe_subscription_id")
+  status               String
+  priceId              String   @map("price_id")
+  currentPeriodStart   DateTime @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd     DateTime @map("current_period_end") @db.Timestamptz(6)
+  cancelAtPeriodEnd    Boolean  @default(false) @map("cancel_at_period_end")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("subscriptions")
 }
@@ -274,10 +236,6 @@ model Payment {
   @@map("payments")
 }
 
-// ========================================
-// ENUMS
-// ========================================
-
 enum JobStatus {
   PROCESSING
   COMPLETED
@@ -286,5 +244,3 @@ enum JobStatus {
 
   @@map("job_status")
 }
-
-

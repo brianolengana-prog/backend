@@ -463,31 +463,32 @@ class ContactsService {
       logger.info(`✅ Found ${contacts.length} contacts to export`);
 
       // Use the centralized export service
-      const exportResult = await exportService.exportContacts(contacts, format, options);
+      const result = await exportService.exportContacts(contacts, format, options);
       
-      // Validate export result
-      if (!exportResult || typeof exportResult !== 'object') {
-        throw new Error('Export service returned invalid result');
+      // Validate result structure
+      if (!result || typeof result !== 'object') {
+        throw new Error(`Invalid export result: expected object, got ${typeof result}`);
       }
       
-      if (!exportResult.data || !exportResult.filename || !exportResult.mimeType) {
-        throw new Error('Export service returned incomplete result (missing data, filename, or mimeType)');
+      if (!result.data || !result.filename || !result.mimeType) {
+        throw new Error(`Invalid export result structure: missing required fields. Got: ${JSON.stringify(Object.keys(result || {}))}`);
       }
       
-      return exportResult;
+      return result;
     } catch (error) {
-      // Safe error logging - handle case where logger might be undefined
-      if (logger && typeof logger.error === 'function') {
-        logger.error('❌ Error exporting contacts', { 
-          error: error && error.message ? error.message : String(error), 
-          userId, 
-          format,
-          stack: error && error.stack ? error.stack : undefined
-        });
-      } else {
-        console.error('❌ Error exporting contacts:', error);
-      }
-      throw error;
+      // Safe error logging - use console.error to avoid winston issues
+      const errorMessage = error?.message || String(error || 'Unknown error');
+      console.error('❌ Error exporting contacts:', {
+        message: errorMessage,
+        userId,
+        format,
+        stack: error?.stack
+      });
+      
+      // Re-throw with a clean error message
+      const exportError = new Error(`Export failed: ${errorMessage}`);
+      exportError.stack = error?.stack;
+      throw exportError;
     }
   }
 

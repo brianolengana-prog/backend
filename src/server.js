@@ -1,30 +1,28 @@
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise);
-  console.error('❌ Reason:', reason);
-  console.error('❌ Stack:', reason?.stack);
-  process.exit(1);
-});
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught Exception:', error);
-  console.error('❌ Stack:', error.stack);
-  process.exit(1);
-});
-
+console.log('📦 Loading modules...');
 const app = require('./app');
+console.log('✅ app.js loaded');
 const db = require('./config/database');
+console.log('✅ database.js loaded');
 const env = require('./config/env');
+console.log('✅ env.js loaded');
 const { startSubscriptionRenewalJob } = require('./jobs/subscription-renewal.job');
+console.log('✅ subscription-renewal.job loaded');
 
 const PORT = env.PORT || 3001;
+console.log('✅ All modules loaded, starting server...');
 
 async function start() {
   try {
     console.log('🔄 Connecting to database...');
     await db.connect();
     console.log('✅ Database connected successfully');
+    
+    // Test database connection
+    const isConnected = await db.testConnection();
+    if (!isConnected) {
+      throw new Error('Database connection test failed');
+    }
+    console.log('✅ Database connection verified');
     
     // Start subscription renewal cron job
     try {
@@ -42,17 +40,8 @@ async function start() {
       console.log(`🌐 API available at http://localhost:${PORT}/api`);
     });
 
-    // Handle server errors
-    server.on('error', (error) => {
-      console.error('❌ Server error:', error);
-      if (error.code === 'EADDRINUSE') {
-        console.error(`❌ Port ${PORT} is already in use`);
-      }
-      process.exit(1);
-    });
-
     process.on('SIGTERM', async () => {
-      console.log('🛑 SIGTERM received, shutting down gracefully...');
+      console.log('🛑 Shutting down gracefully...');
       server.close(async () => {
         await db.disconnect();
         console.log('✅ Shutdown complete');
@@ -60,12 +49,10 @@ async function start() {
       });
     });
   } catch (e) {
-    console.error('❌ Failed to start server:', e);
-    console.error('❌ Error details:', {
-      message: e.message,
-      stack: e.stack,
-      name: e.name
-    });
+    console.error('❌ Failed to start server:', e.message);
+    if (e.stack) {
+      console.error('Stack trace:', e.stack);
+    }
     process.exit(1);
   }
 }
