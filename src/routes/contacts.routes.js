@@ -131,7 +131,7 @@ router.get('/', async (req, res) => {
     // STRICT: If jobId in query, enforce strict scoping (don't allow 'all' override)
     const queryOptions = {
       ...options,
-      jobId: queryJobId && queryJobId !== 'all' ? queryJobId : options.jobId
+      jobId: jobId && jobId !== 'all' ? jobId : options.jobId
     };
     
     const result = await service.getContactsPaginated(req.user.id, queryOptions);

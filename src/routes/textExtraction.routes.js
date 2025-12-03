@@ -576,10 +576,54 @@ router.post('/save-contacts', smartRateLimit('textExtraction'), async (req, res)
     // Ensure profile exists
     await ensureProfileForUser(userId);
 
-    let finalJobId = jobId;
+    // Validate jobId is a valid UUID (client-side IDs like "client_xxx" are not valid UUIDs)
+    const isValidUUID = (str) => {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      return uuidRegex.test(str);
+    };
 
-    // If no jobId provided, create a new job
-    if (!finalJobId) {
+    let finalJobId = null;
+    let isNewJob = false;
+
+    // Only use jobId if it's a valid UUID (from database)
+    if (jobId && isValidUUID(jobId)) {
+      // Try to find and update existing job
+      try {
+        const existingJob = await prisma.job.findUnique({
+          where: { id: jobId, userId }
+        });
+
+        if (existingJob) {
+          finalJobId = jobId;
+          // Update existing job if needed
+          await prisma.job.update({
+            where: { id: finalJobId },
+            data: {
+              status: 'COMPLETED',
+              fileName: fileName || undefined
+            }
+          }).catch(err => {
+            logger.warn('⚠️ Failed to update existing job', { jobId: finalJobId, error: err.message });
+          });
+          logger.info('✅ Using existing job for saved contacts', { jobId: finalJobId });
+        } else {
+          logger.warn('⚠️ Job not found or not owned by user, creating new job', { providedJobId: jobId });
+          isNewJob = true;
+        }
+      } catch (err) {
+        logger.warn('⚠️ Error checking existing job, creating new job', { providedJobId: jobId, error: err.message });
+        isNewJob = true;
+      }
+    } else {
+      // Invalid UUID or client-side ID - create new job
+      if (jobId) {
+        logger.info('ℹ️ Client-side jobId provided, creating new database job', { clientJobId: jobId });
+      }
+      isNewJob = true;
+    }
+
+    // Create new job if needed
+    if (!finalJobId || isNewJob) {
       const job = await prisma.job.create({
         data: {
           userId,
@@ -590,17 +634,6 @@ router.post('/save-contacts', smartRateLimit('textExtraction'), async (req, res)
       });
       finalJobId = job.id;
       logger.info('✅ Created new job for saved contacts', { jobId: finalJobId });
-    } else {
-      // Update existing job if needed
-      await prisma.job.update({
-        where: { id: finalJobId },
-        data: {
-          status: 'COMPLETED',
-          fileName: fileName || undefined
-        }
-      }).catch(err => {
-        logger.warn('⚠️ Failed to update existing job', { jobId: finalJobId, error: err.message });
-      });
     }
 
     // Prepare contacts data
@@ -615,8 +648,8 @@ router.post('/save-contacts', smartRateLimit('textExtraction'), async (req, res)
       isSelected: true
     }));
 
-    // Delete existing contacts for this job (if updating)
-    if (jobId) {
+    // Delete existing contacts for this job (if updating an existing job, not a new one)
+    if (!isNewJob && finalJobId) {
       await prisma.contact.deleteMany({
         where: { jobId: finalJobId }
       });
