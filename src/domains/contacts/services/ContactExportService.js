@@ -50,8 +50,15 @@ class ContactExportService {
     // STRICT: Get contacts with job scoping
     const contacts = await this.getContactsForExport(userId, { jobId, contactIds });
 
+    logger.info(`Retrieved ${contacts.length} contacts for export`, { 
+      userId, 
+      jobId, 
+      contactIds: contactIds?.length || 0 
+    });
+
     if (contacts.length === 0) {
-      throw new Error('No contacts found to export');
+      logger.warn('No contacts found to export', { userId, jobId, contactIds });
+      throw new Error(`No contacts found to export${jobId ? ` for job ${jobId}` : ''}`);
     }
 
     logger.info(`Found ${contacts.length} contacts to export`);
@@ -111,18 +118,37 @@ class ContactExportService {
   async getContactsForExport(userId, { jobId, contactIds }) {
     // STRICT: If jobId provided, ONLY get contacts from that job
     if (jobId && jobId !== 'all') {
+      logger.info(`Getting contacts for export`, { userId, jobId, contactIds: contactIds?.length || 0 });
+      
       // ✅ SECURITY: Pass userId to repository for server-side filtering
       const jobContacts = await this.contactRepository.findByJobId(jobId, userId);
       
+      logger.info(`Found ${jobContacts.length} contacts for job ${jobId}`, { 
+        userId,
+        jobId,
+        contactCount: jobContacts.length 
+      });
+      
       // Additional client-side filter for safety (should already be filtered by repository)
-      let userContacts = jobContacts.filter(c => c.userId === userId);
+      const userContacts = jobContacts.filter(c => {
+        // Handle both entity objects and plain objects
+        const contactUserId = c.userId || (c.toObject && c.toObject().userId);
+        return contactUserId === userId;
+      });
+      
+      logger.info(`After user filter: ${userContacts.length} contacts`, { userId });
       
       // If specific contact IDs requested, filter further
       if (contactIds && contactIds.length > 0) {
-        return jobContacts.filter(c => contactIds.includes(c.id));
+        const filtered = userContacts.filter(c => {
+          const contactId = c.id || (c.toObject && c.toObject().id);
+          return contactIds.includes(contactId);
+        });
+        logger.info(`After contactIds filter: ${filtered.length} contacts`);
+        return filtered;
       }
       
-      return jobContacts;
+      return userContacts;
     }
 
     // If specific contact IDs requested, get those

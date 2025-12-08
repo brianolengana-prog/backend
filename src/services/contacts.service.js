@@ -439,6 +439,13 @@ class ContactsService {
         ...(jobId && { jobId })
       };
 
+      logger.info(`Querying contacts for export`, { 
+        userId, 
+        jobId, 
+        contactIds: contactIds?.length || 0,
+        whereClause: where
+      });
+
       // Fetch contacts
       const contacts = await prisma.contact.findMany({
         where,
@@ -456,8 +463,16 @@ class ContactsService {
         }
       });
 
+      logger.info(`Found ${contacts.length} contacts matching query`, { 
+        userId, 
+        jobId,
+        contactCount: contacts.length 
+      });
+
       if (contacts.length === 0) {
-        throw new Error('No contacts found to export');
+        const errorMsg = `No contacts found to export${jobId ? ` for job ${jobId}` : ''}${contactIds?.length ? ` with specified IDs` : ''}`;
+        logger.warn(errorMsg, { userId, jobId, contactIds });
+        throw new Error(errorMsg);
       }
 
       logger.info(`✅ Found ${contacts.length} contacts to export`);

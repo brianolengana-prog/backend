@@ -232,10 +232,6 @@ router.get('/export', async (req, res) => {
     
     const { data, filename, mimeType } = result;
     
-    // Set headers BEFORE sending response
-    res.setHeader('Content-Type', mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    
     // Send buffer for Excel, string for others (CSV, JSON, vCard)
     if (format.toLowerCase() === 'excel' || format.toLowerCase() === 'xlsx') {
       // Ensure data is a Buffer and set Content-Length correctly
@@ -257,17 +253,23 @@ router.get('/export', async (req, res) => {
         buffer = Buffer.from(data);
       }
       
-      // Set Content-Length header with actual buffer length
-      res.setHeader('Content-Length', buffer.length);
-      
       domainLogger.info('Sending Excel buffer', { 
         bufferLength: buffer.length, 
         filename,
-        userId: req.user.id 
+        userId: req.user.id,
+        bufferType: Buffer.isBuffer(buffer) ? 'Buffer' : typeof buffer
       });
       
-      // Use res.end() with binary encoding to ensure no text encoding is applied
-      res.end(buffer, 'binary');
+      // Set headers and send binary data
+      // Use res.writeHead() to ensure headers are set before data
+      res.writeHead(200, {
+        'Content-Type': mimeType,
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': buffer.length
+      });
+      
+      // Send buffer as binary
+      res.end(buffer);
     } else {
       // CSV, JSON, vCard are strings - validate and send
       if (typeof data !== 'string') {
