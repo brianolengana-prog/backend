@@ -232,27 +232,18 @@ router.get('/export', async (req, res) => {
     
     const { data, filename, mimeType } = result;
     
+    // Set headers BEFORE sending response
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     
     // Send buffer for Excel, string for others (CSV, JSON, vCard)
     if (format.toLowerCase() === 'excel' || format.toLowerCase() === 'xlsx') {
-      // data is already a Buffer from XLSX.write(), send it directly
+      // Ensure data is a Buffer and set Content-Length correctly
+      let buffer;
       if (Buffer.isBuffer(data)) {
-        domainLogger.info('Sending Excel buffer', { 
-          bufferLength: data.length, 
-          filename,
-          userId: req.user.id 
-        });
-        res.send(data);
+        buffer = data;
       } else if (data instanceof Uint8Array) {
-        // Handle Uint8Array (alternative buffer type)
-        domainLogger.info('Converting Uint8Array to Buffer for Excel', { 
-          arrayLength: data.length,
-          filename,
-          userId: req.user.id 
-        });
-        res.send(Buffer.from(data));
+        buffer = Buffer.from(data);
       } else {
         // Fallback: try to convert to buffer
         domainLogger.error('Excel export data is not a Buffer', { 
@@ -263,8 +254,20 @@ router.get('/export', async (req, res) => {
           filename,
           userId: req.user.id
         });
-        res.send(Buffer.from(data));
+        buffer = Buffer.from(data);
       }
+      
+      // Set Content-Length header with actual buffer length
+      res.setHeader('Content-Length', buffer.length);
+      
+      domainLogger.info('Sending Excel buffer', { 
+        bufferLength: buffer.length, 
+        filename,
+        userId: req.user.id 
+      });
+      
+      // Use res.end() with binary encoding to ensure no text encoding is applied
+      res.end(buffer, 'binary');
     } else {
       // CSV, JSON, vCard are strings - validate and send
       if (typeof data !== 'string') {
