@@ -49,7 +49,25 @@ router.post('/google/callback', async (req, res) => {
 
 // ✅ EXPLICIT OPTIONS HANDLER for Google OAuth (prevents cold start CORS issues)
 router.options('/google/url', (req, res) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  // ✅ SECURITY: Only allow specific origins, never wildcard
+  const allowedOrigin = req.headers.origin;
+  const env = require('../config/env');
+  const allowedOrigins = [
+    env.FRONTEND_URL,
+    'https://www.callsheetconverter.com',
+    'https://callsheetconverter.com',
+    'https://www.callsheetconvert.com',
+    'https://callsheetconvert.com',
+  ];
+  
+  if (allowedOrigin && allowedOrigins.includes(allowedOrigin)) {
+    res.header('Access-Control-Allow-Origin', allowedOrigin);
+  } else if (process.env.NODE_ENV === 'development' && allowedOrigin?.startsWith('http://localhost:')) {
+    res.header('Access-Control-Allow-Origin', allowedOrigin);
+  } else {
+    // No origin or not allowed - don't set header (browser will block)
+    return res.status(403).json({ error: 'CORS policy violation' });
+  }
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
@@ -59,7 +77,25 @@ router.options('/google/url', (req, res) => {
 router.get('/google/url', async (req, res) => {
   try {
     // ✅ EXPLICIT CORS HEADERS (defense in depth for Render cold starts)
-    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    // ✅ SECURITY: Only allow specific origins, never wildcard
+  const allowedOrigin = req.headers.origin;
+  const env = require('../config/env');
+  const allowedOrigins = [
+    env.FRONTEND_URL,
+    'https://www.callsheetconverter.com',
+    'https://callsheetconverter.com',
+    'https://www.callsheetconvert.com',
+    'https://callsheetconvert.com',
+  ];
+  
+  if (allowedOrigin && allowedOrigins.includes(allowedOrigin)) {
+    res.header('Access-Control-Allow-Origin', allowedOrigin);
+  } else if (process.env.NODE_ENV === 'development' && allowedOrigin?.startsWith('http://localhost:')) {
+    res.header('Access-Control-Allow-Origin', allowedOrigin);
+  } else {
+    // No origin or not allowed - don't set header (browser will block)
+    return res.status(403).json({ error: 'CORS policy violation' });
+  }
     res.header('Access-Control-Allow-Credentials', 'true');
     
     const url = authService.getGoogleAuthUrl();
@@ -129,7 +165,25 @@ module.exports = router;
 // Authenticated profile route
 // ✅ EXPLICIT OPTIONS HANDLER for /auth/me (prevents cold start CORS issues)
 router.options('/me', (req, res) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  // ✅ SECURITY: Only allow specific origins, never wildcard
+  const allowedOrigin = req.headers.origin;
+  const env = require('../config/env');
+  const allowedOrigins = [
+    env.FRONTEND_URL,
+    'https://www.callsheetconverter.com',
+    'https://callsheetconverter.com',
+    'https://www.callsheetconvert.com',
+    'https://callsheetconvert.com',
+  ];
+  
+  if (allowedOrigin && allowedOrigins.includes(allowedOrigin)) {
+    res.header('Access-Control-Allow-Origin', allowedOrigin);
+  } else if (process.env.NODE_ENV === 'development' && allowedOrigin?.startsWith('http://localhost:')) {
+    res.header('Access-Control-Allow-Origin', allowedOrigin);
+  } else {
+    // No origin or not allowed - don't set header (browser will block)
+    return res.status(403).json({ error: 'CORS policy violation' });
+  }
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
