@@ -260,12 +260,15 @@ router.get('/export', async (req, res) => {
         bufferType: Buffer.isBuffer(buffer) ? 'Buffer' : typeof buffer
       });
       
-      // Set headers and send binary data
+      // ✅ FIXED: Set headers and send binary data
       // Use res.writeHead() to ensure headers are set before data
       res.writeHead(200, {
         'Content-Type': mimeType,
         'Content-Disposition': `attachment; filename="${filename}"`,
-        'Content-Length': buffer.length
+        'Content-Length': buffer.length,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
       });
       
       // Send buffer as binary
@@ -305,7 +308,20 @@ router.get('/export', async (req, res) => {
         userId: req.user.id
       });
 
-      res.send(data);
+      // ✅ FIXED: Use writeHead() for all formats to ensure headers are set correctly
+      // This prevents Express from modifying the response
+      const contentLength = Buffer.byteLength(data, 'utf8');
+      res.writeHead(200, {
+        'Content-Type': mimeType,
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': contentLength,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      });
+      
+      // Send the data and end the response
+      res.end(data, 'utf8');
     }
   } catch (error) {
     console.error('❌ Error exporting contacts:', {
