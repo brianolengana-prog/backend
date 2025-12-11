@@ -1,5 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const subscriptionService = require('./subscription.service');
+const notificationService = require('./notification.service');
 
 const prisma = new PrismaClient();
 
@@ -492,6 +493,17 @@ class UsageService {
       switch (actionType) {
         case 'upload':
           await this.recordUpload(userId, 0); // We'll update contact count separately
+          // After recording, check thresholds and send notifications
+          try {
+            const usage = await this.getCurrentUsage(userId);
+            await notificationService.notifyUsageThreshold(userId, {
+              uploadsUsed: usage.uploadsUsed,
+              uploadsLimit: usage.uploadsLimit,
+              planId: usage.planId
+            });
+          } catch (notifyError) {
+            console.warn('⚠️ Failed to send usage notification:', notifyError.message);
+          }
           break;
           
         case 'api_call':

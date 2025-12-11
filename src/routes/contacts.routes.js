@@ -260,19 +260,24 @@ router.get('/export', async (req, res) => {
         bufferType: Buffer.isBuffer(buffer) ? 'Buffer' : typeof buffer
       });
       
-      // ✅ FIXED: Set headers and send binary data
-      // Use res.writeHead() to ensure headers are set before data
-      res.writeHead(200, {
+      // ✅ FIXED: Disable compression for binary responses
+      // Compression middleware can interfere with binary data
+      res.set({
         'Content-Type': mimeType,
         'Content-Disposition': `attachment; filename="${filename}"`,
-        'Content-Length': buffer.length,
+        'Content-Length': buffer.length.toString(),
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
-        'Expires': '0'
+        'Expires': '0',
+        'X-Content-Type-Options': 'nosniff'
       });
       
-      // Send buffer as binary
-      res.end(buffer);
+      // Disable compression for this response (compression middleware respects this)
+      res.setHeader('Content-Encoding', 'identity');
+      
+      // Send buffer as binary - res.send() handles Buffer objects correctly
+      // Return immediately to prevent any further processing
+      return res.send(buffer);
     } else {
       // CSV, JSON, vCard are strings - validate and send
       if (typeof data !== 'string') {
@@ -308,20 +313,19 @@ router.get('/export', async (req, res) => {
         userId: req.user.id
       });
 
-      // ✅ FIXED: Use writeHead() for all formats to ensure headers are set correctly
-      // This prevents Express from modifying the response
+      // ✅ FIXED: Set headers explicitly for text formats
       const contentLength = Buffer.byteLength(data, 'utf8');
-      res.writeHead(200, {
+      res.set({
         'Content-Type': mimeType,
         'Content-Disposition': `attachment; filename="${filename}"`,
-        'Content-Length': contentLength,
+        'Content-Length': contentLength.toString(),
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0'
       });
       
-      // Send the data and end the response
-      res.end(data, 'utf8');
+      // Send the data and return immediately to prevent any further processing
+      return res.send(data);
     }
   } catch (error) {
     console.error('❌ Error exporting contacts:', {

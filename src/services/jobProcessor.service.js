@@ -10,6 +10,7 @@ const optimizedAIExtractionService = require('./optimizedAIExtraction.service');
 const awsTextractService = require('./awsTextract.service');
 const extractionService = require('./extraction.service');
 const usageService = require('./usage.service');
+const notificationService = require('./notification.service');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
@@ -116,6 +117,19 @@ class JobProcessorService {
         extractionMethod
       });
 
+      // Notify user of completion
+      try {
+        await notificationService.notifyExtractionComplete(userId, {
+          jobId: jobRecord.id,
+          fileName,
+          contactsFound: result.contacts?.length || 0,
+          processingTime,
+          method: extractionMethod
+        });
+      } catch (notifyError) {
+        logger.warn('⚠️ Failed to send extraction completion notification', { error: notifyError.message });
+      }
+
       return {
         success: true,
         jobId: jobRecord.id,
@@ -147,6 +161,17 @@ class JobProcessorService {
         error: error.message,
         processingTime
       });
+
+      // Notify user of failure
+      try {
+        await notificationService.notifyExtractionFailed(userId, {
+          jobId: job.id,
+          fileName,
+          errorMessage: error.message
+        });
+      } catch (notifyError) {
+        logger.warn('⚠️ Failed to send extraction failure notification', { error: notifyError.message });
+      }
 
       throw error;
     }
